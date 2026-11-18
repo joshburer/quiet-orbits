@@ -252,25 +252,31 @@ for (const p of PALETTES) {
 /* Colour lookup: for every scene colour, the two palette entries that best mix to it and the mix ratio. */
 const LN = 40, LN1 = LN - 1;
 const lutA = new Uint8Array(LN*LN*LN), lutB = new Uint8Array(LN*LN*LN), lutT = new Uint8Array(LN*LN*LN);
-function gdist(a, r, g, b) {
-  const dr = a[0]-r, dg = a[1]-g, db = a[2]-b, dy = 0.3*dr + 0.59*dg + 0.11*db;
-  return 0.3*dr*dr + 0.59*dg*dg + 0.11*db*db + dy*dy;
+let oL = 0, oA = 0, oB = 0;
+function oklab(r, g, b) { // linear rgb → Oklab, so "closest colour" means closest to the eye
+  const l = Math.cbrt(0.4122214708*r + 0.5363325363*g + 0.0514459929*b), m = Math.cbrt(0.2119034982*r + 0.6806995451*g + 0.1073969566*b), s = Math.cbrt(0.0883024619*r + 0.2817188376*g + 0.6299787005*b);
+  oL = 0.2104542553*l + 0.7936177850*m - 0.0040720468*s; oA = 1.9779984951*l - 2.4285922050*m + 0.4505937099*s; oB = 0.0259040371*l + 0.7827717662*m - 0.8086757660*s;
 }
+const CHROMA_W = 2.2, PAIR_COST = 0.1;
 function buildLUT(pal) {
   const n = pal.lin.length, lin = pal.lin, gam = pal.gam, d = new Float32Array(n), cand = [0,0,0,0];
   const luma = gam.map(c => 0.3*c[0] + 0.59*c[1] + 0.11*c[2]);
+  const lab = lin.map(c => { oklab(c[0], c[1], c[2]); return [oL, oA, oB]; });
+  const labDist = (a, b) => { const dl = a[0]-b[0], da = a[1]-b[1], db = a[2]-b[2]; return dl*dl + CHROMA_W * (da*da + db*db); };
   // scene black lands on the palette's ground colour and scene white on its far end
   const seq = luma.map((_, i) => i).sort((a, b) => luma[a] - luma[b]); if (pal.invert) seq.reverse();
-  const D = gam[seq[0]], Lt = gam[seq[n - 1]];
-  const unmap = c => [0, 1, 2].map(k => { const sp = Lt[k] - D[k]; const v = Math.abs(sp) < 1e-4 ? 0 : clamp((c[k] - D[k]) / sp, 0, 1); return v * v; });
+  // one brightness scale for all three channels, so hues survive a tinted light end
+  const D = gam[seq[0]], span = luma[seq[n - 1]] - luma[seq[0]];
+  const unmap = c => [0, 1, 2].map(k => { const v = Math.abs(span) < 1e-4 ? 0 : clamp((c[k] - D[k]) / span, 0, 1); return v * v; });
   pal.seq = seq;
   pal.night = n >= 3 ? unmap(gam[seq[1]]) : [0, 0, 0];
   pal.midc = n >= 3 ? unmap(gam[seq[Math.ceil((n - 1) / 2)]]) : [1, 1, 1];
   let cell = 0;
   for (let ri = 0; ri < LN; ri++) for (let gi = 0; gi < LN; gi++) for (let bi = 0; bi < LN; bi++, cell++) {
-    const tr = D[0] + ri/LN1 * (Lt[0] - D[0]), tg = D[1] + gi/LN1 * (Lt[1] - D[1]), tb = D[2] + bi/LN1 * (Lt[2] - D[2]);
+    const tr = clamp(D[0] + ri/LN1 * span, 0, 1), tg = clamp(D[1] + gi/LN1 * span, 0, 1), tb = clamp(D[2] + bi/LN1 * span, 0, 1);
     const lr = tr*tr, lg = tg*tg, lb = tb*tb;
-    for (let i = 0; i < n; i++) d[i] = gdist(gam[i], tr, tg, tb);
+    oklab(lr, lg, lb); const tL = oL, tA = oA, tB = oB;
+    for (let i = 0; i < n; i++) { const dl = lab[i][0]-tL, da = lab[i][1]-tA, db = lab[i][2]-tB; d[i] = dl*dl + CHROMA_W * (da*da + db*db); }
     const k = Math.min(4, n);
     for (let c = 0; c < k; c++) {
       let best = -1, bd = 1e9;
@@ -283,10 +289,9 @@ function buildLUT(pal) {
       const dx = B[0]-A[0], dy = B[1]-A[1], dz = B[2]-A[2], l2 = dx*dx + dy*dy + dz*dz;
       if (l2 < 1e-9) continue;
       const tt = clamp(((lr-A[0])*dx + (lg-A[1])*dy + (lb-A[2])*dz) / l2, 0, 1);
-      const mr = Math.sqrt(A[0]+tt*dx), mg = Math.sqrt(A[1]+tt*dy), mb = Math.sqrt(A[2]+tt*dz);
-      const dr = mr-tr, dg = mg-tg, db = mb-tb, dl = 0.3*dr + 0.59*dg + 0.11*db;
-      const pg = gam[cand[j]];
-      const e = 0.3*dr*dr + 0.59*dg*dg + 0.11*db*db + dl*dl + 0.11 * gdist(gam[cand[i]], pg[0], pg[1], pg[2]) * 4*tt*(1-tt);
+      oklab(A[0]+tt*dx, A[1]+tt*dy, A[2]+tt*dz);
+      const dl = oL-tL, da = oA-tA, db = oB-tB;
+      const e = dl*dl + CHROMA_W * (da*da + db*db) + PAIR_COST * labDist(lab[cand[i]], lab[cand[j]]) * 4*tt*(1-tt);
       if (e < err) { err = e; a = cand[i]; b = cand[j]; t = tt; }
     }
     if (luma[a] > luma[b]) { const s = a; a = b; b = s; t = 1 - t; }
@@ -365,6 +370,7 @@ function buildThr() {
 let sR = 0, sG = 0, sB = 0, sE0 = 0, sE1 = 0, sE2 = 0, sSpec = 0, sTag = 0;
 const put = c => { sR = c[0]; sG = c[1]; sB = c[2]; };
 
+const ov = (v, d) => v === undefined ? d : v;
 function mkTerran(R, ocean) {
   const f = R.range(1.1, 1.9), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
   const sea = ocean ? R.range(0.09, 0.19) : R.range(-0.09, 0.05);
@@ -387,11 +393,11 @@ function mkTerran(R, ocean) {
     put(e < 0.235 ? high : peak);
   };
 }
-function mkDesert(R) {
+function mkDesert(R, o = {}) {
   const f = R.range(1.2, 2.2), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
-  const h0 = R.weighted([[28,4],[14,2],[42,2],[350,1],[65,.8]]);
+  const h0 = ov(o.h, R.weighted([[28,4],[14,2],[42,2],[350,1],[65,.8]]));
   const ramp = [hsv(h0, .5, .42), hsv(h0 + 8, .46, .6), hsv(h0 + 14, .38, .76), hsv(h0 - 12, .52, .52), hsv(h0 + 20, .22, .88)];
-  const scar = hsv(h0 - 20, .5, .26), cap = hsv(h0 + 160, .06, .94), capLat = R.chance(.5) ? R.range(.8, .93) : 2;
+  const scar = hsv(h0 - 20, .5, .26), cap = hsv(h0 + 160, .06, .94), capLat = ov(o.capLat, R.chance(.5) ? R.range(.8, .93) : 2);
   const strata = R.range(7, 12);
   return (x, y, z, oct) => {
     sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
@@ -403,9 +409,9 @@ function mkDesert(R) {
     put(ramp[(s | 0) % 5]);
   };
 }
-function mkIce(R) {
+function mkIce(R, o = {}) {
   const f = R.range(1.3, 2.1), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
-  const h0 = R.weighted([[200,4],[185,2],[220,2],[165,1],[250,1]]);
+  const h0 = ov(o.h, R.weighted([[200,4],[185,2],[220,2],[165,1],[250,1]]));
   const a = hsv(h0, .05, .98), b = hsv(h0 - 6, .26, .9), c = hsv(h0 + 6, .46, .7), crack = hsv(h0 + 15, .58, .42);
   return (x, y, z, oct) => {
     sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
@@ -429,9 +435,9 @@ function mkLava(R) {
     put(h > 0.12 ? c2 : h > 0 ? c1 : c0);
   };
 }
-function mkBarren(R) {
+function mkBarren(R, o = {}) {
   const f = R.range(1.4, 2.4), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
-  const h0 = R.weighted([[30,3],[220,2],[0,1],[280,1],[60,1]]), sat = R.range(.04, .2);
+  const h0 = ov(o.h, R.weighted([[30,3],[220,2],[0,1],[280,1],[60,1]])), sat = ov(o.sat, R.range(.04, .2));
   const lite = hsv(h0, sat, .8), mid = hsv(h0, sat, .62), dark = hsv(h0 + 20, sat + .05, .42), pit = hsv(h0 + 20, sat + .05, .3), rim = hsv(h0, sat * .6, .92);
   const cs = R.range(2.4, 4.2), cseed = R.int(0, 9999);
   return (x, y, z, oct) => {
@@ -453,14 +459,18 @@ function mkBarren(R) {
     put(h > 0.09 ? lite : h > -0.07 ? mid : dark);
   };
 }
-function mkGas(R) {
+function mkGas(R, o = {}) {
   const ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
-  const h0 = R.weighted([[28,3],[44,2.5],[212,2.5],[176,2],[282,1.2],[348,1.2],[128,1]]);
-  const ramp = [hsv(h0 - 8, .5, .4), hsv(h0, .48, .58), hsv(h0 + 10, .38, .74), hsv(h0 + 18, .2, .9), hsv(h0 + R.pick([-40, 150, 40]), .42, .6)];
-  const NB = R.int(8, 15), table = []; let prev = -1;
+  const h0 = ov(o.h, R.weighted([[28,3],[44,2.5],[212,2.5],[176,2],[282,1.2],[348,1.2],[128,1]]));
+  const acc = ov(o.accent, R.pick([-40, 150, 40])), sm = ov(o.sat, 1);
+  let ramp = [hsv(h0 - 8, .5*sm, .4), hsv(h0, .48*sm, .58), hsv(h0 + 10, .38*sm, .74), hsv(h0 + 18, .2*sm, .9), hsv(h0 + acc, .42*sm, .6)];
+  if (o.contrast !== undefined) { const base = ramp[2]; ramp = ramp.map(c => mix3(base, c, o.contrast)); }
+  if (o.lift) ramp = ramp.map(c => mix3(c, [1, 1, 1], o.lift));
+  const NB = ov(o.nb, R.int(8, 15)), table = []; let prev = -1;
   for (let i = 0; i < NB + 2; i++) { let v; do { v = R.weighted([[0,2],[1,3],[2,3],[3,2],[4,1]]); } while (v === prev); table.push(prev = v); }
-  const turb = R.range(.4, 1.3);
-  const storm = R.chance(.6) ? { p: norm([R.range(-1, 1), R.range(-.45, .45), R.range(-1, 1)]), r: R.range(.13, .24), c: R.chance(.5) ? ramp[4] : ramp[3] } : null;
+  const turb = ov(o.turb, R.range(.4, 1.3));
+  let storm = R.chance(.6) ? { p: norm([R.range(-1, 1), R.range(-.45, .45), R.range(-1, 1)]), r: R.range(.13, .24), c: R.chance(.5) ? ramp[4] : ramp[3] } : null;
+  if (o.storm !== undefined) storm = o.storm && { p: [Math.cos(o.storm.lat * Math.PI / 180), Math.sin(o.storm.lat * Math.PI / 180), 0], r: o.storm.r, c: o.storm.red ? hsv(8, .62, .62) : ramp[0] };
   return (x, y, z, oct) => {
     sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
     if (storm) { const dx = x - storm.p[0], dy = (y - storm.p[1]) * 1.9, dz = z - storm.p[2]; if (dx*dx + dy*dy + dz*dz < storm.r * storm.r) return put(storm.c); }
@@ -469,9 +479,9 @@ function mkGas(R) {
     put(ramp[table[clamp(v | 0, 0, NB + 1)]]);
   };
 }
-function mkShroud(R) {
+function mkShroud(R, o = {}) {
   const ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
-  const h0 = R.weighted([[40,3],[25,2],[70,1.5],[300,1],[160,1],[200,1]]);
+  const h0 = ov(o.h, R.weighted([[40,3],[25,2],[70,1.5],[300,1],[160,1],[200,1]]));
   const a = hsv(h0, .34, .88), b = hsv(h0 - 8, .44, .72), c = hsv(h0 - 16, .5, .54);
   return (x, y, z, oct) => {
     sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
@@ -481,7 +491,52 @@ function mkShroud(R) {
   };
 }
 
+const EARTH_LAND = [
+  [[-70,-20]],
+  [[-120,-70],[-60,-20],[80,115]],
+  [[-180,-170],[-165,-95],[-80,-62],[-52,-40],[-22,-15],[6,180]],
+  [[-130,-58],[-8,1],[5,140],[155,162]],
+  [[-124,-62],[-9,135],[140,145]],
+  [[-122,-76],[-9,11],[26,122],[126,129],[131,141]],
+  [[-113,-97],[-82,-80],[-16,58],[60,120]],
+  [[-105,-84],[-74,-70],[-17,51],[73,86],[94,109],[120,125]],
+  [[-83,-51],[-13,48],[79,81],[96,104],[109,118]],
+  [[-80,-35],[9,41],[100,125],[131,150]],
+  [[-77,-38],[12,40],[44,50],[123,146]],
+  [[-71,-42],[14,35],[44,47],[114,153]],
+  [[-73,-54],[18,29],[116,124],[136,151],[173,178]],
+  [[-75,-64],[145,148],[167,172]],
+  [[-73,-66]],
+  [[-65,-58],[0,160]],
+  [[-180,180]],
+  [[-180,180]],
+];
+function mkEarth(R) {
+  const ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60), DEG = 180 / Math.PI;
+  const deep = hsv(216, .64, .36), shallow = hsv(205, .5, .56), low = hsv(105, .44, .6), mid = hsv(128, .5, .42);
+  const arid = hsv(40, .42, .74), high = hsv(30, .2, .55), ice = hsv(200, .06, .97);
+  const box = (lat, lon, a, b, c, d) => lat > a && lat < b && lon > c && lon < d;
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    // nudge the lookup so the coarse grid reads as coastline rather than blocks
+    const w1 = noise3(x*2.6 + ox, y*2.6 + oy, z*2.6 + oz), w2 = noise3(x*2.6 + oz, y*2.6 + ox, z*2.6 + oy);
+    const f1 = oct > 2 ? noise3(x*7 + oy, y*7 + oz, z*7 + ox) : 0, f2 = oct > 2 ? noise3(x*7 + ox, y*7 + oy, z*7 - oz) : 0;
+    const rawLat = Math.asin(clamp(y, -1, 1)) * DEG, cl = Math.max(.35, Math.sqrt(1 - y*y));
+    const lat = rawLat + w1 * 6 + f1 * 2.5; let lon = Math.atan2(z, x) * DEG + (w2 * 6 + f2 * 2.5) / cl;
+    if (lon > 180) lon -= 360; else if (lon < -180) lon += 360;
+    if (lat > 80) return put(ice);
+    const row = EARTH_LAND[clamp((90 - lat) / 10 | 0, 0, 17)]; let land = false;
+    for (let i = 0; i < row.length; i++) if (lon >= row[i][0] && lon <= row[i][1]) { land = true; break; }
+    if (!land) { sSpec = 1; return put(noise3(x*2.2 + oz, y*2.2 + oy, z*2.2 + ox) > 0.22 ? shallow : deep); }
+    if (lat < -62 || lat > 74 || box(lat, lon, 60, 90, -60, -18)) return put(ice);
+    if (box(lat, lon, 14, 33, -17, 62) || box(lat, lon, -31, -19, 116, 144) || box(lat, lon, -29, -18, 14, 25) || box(lat, lon, 37, 47, 55, 108) || box(lat, lon, 30, 37, -116, -103)) return put(arid);
+    if (box(lat, lon, 28, 37, 78, 101)) return put(high);
+    sTag = 1; put(lat > 50 || (lat < 9 && lat > -12) ? mid : low);
+  };
+}
+
 const KINDS = {
+  earth:  { label: 'Living world', mk: mkEarth, atmo: R => ({ h: 207, s: .5, dens: .6, w: .16 }), cloud: [.34, .34] },
   terran: { label: 'Living world', mk: R => mkTerran(R, false), atmo: R => ({ h: R.pick([205, 195, 220, 180]), s: .5, dens: R.range(.5, .75), w: R.range(.14, .22) }), cloud: [.3, .62] },
   ocean:  { label: 'Ocean world',  mk: R => mkTerran(R, true),  atmo: R => ({ h: R.pick([200, 190, 215, 170]), s: .45, dens: R.range(.55, .8), w: R.range(.15, .24) }), cloud: [.45, .75] },
   desert: { label: 'Desert world', mk: mkDesert, atmo: R => ({ h: R.pick([28, 18, 40]), s: .4, dens: R.range(.25, .5), w: R.range(.08, .14) }), cloud: [0, .22] },
@@ -523,9 +578,9 @@ function makeRing(R, tint) {
   const h = R.chance(.6) ? R.range(28, 48) : tint;
   return { inner, outer, tab, debris, col: hsv(h, R.range(.12, .34), R.range(.8, .95)), col2: hsv(h + R.pick([-150, 160, 30]), R.range(.2, .4), R.range(.55, .75)), ox: R.range(0, 50), spin: R.range(.02, .05) };
 }
-function makeWorld(R, kindName, radius, isMoon) {
-  const K = KINDS[kindName], b = { kind: isMoon ? 'moon' : 'planet', type: kindName, label: K.label, R: radius, moons: [] };
-  b.surf = K.mk(R);
+function makeWorld(R, kindName, radius, isMoon, o = {}) {
+  const K = KINDS[kindName], b = { kind: isMoon ? 'moon' : 'planet', type: kindName, label: o.label || K.label, R: radius, moons: [] };
+  b.surf = K.mk(R, o);
   b.avg = avgColor(b.surf);
   if (K.atmo && !(isMoon && R.chance(.7))) {
     const a = K.atmo(R); let col;
@@ -533,17 +588,100 @@ function makeWorld(R, kindName, radius, isMoon) {
     else col = hsv(a.h, a.s, 1);
     b.atmo = { col, dens: a.dens, w: a.w };
   } else b.atmo = null;
-  const cv = R.range(K.cloud[0], K.cloud[1]);
+  if (o.atmo !== undefined) b.atmo = o.atmo && { col: hsv(o.atmo.h, o.atmo.s, 1), dens: o.atmo.dens, w: o.atmo.w };
+  const cv = ov(o.cloud, R.range(K.cloud[0], K.cloud[1]));
   b.cloud = cv > 0.12 && !isMoon ? { thr: lerp(.2, -.1, cv), f: R.range(1.5, 2.4), ox: R.range(-40, 40), oz: R.range(-40, 40), rate: R.range(.008, .02) * (R.chance(.5) ? 1 : -1),
     col: hsv(R.pick([40, 200, 0]), .04, .98), col2: hsv(210, .12, .82) } : null;
-  b.lights = kindName === 'terran' && R.chance(.16);
+  b.lights = ov(o.lights, kindName === 'terran' && R.chance(.16));
   b.spinP = kindName === 'gas' ? R.range(14, 26) : R.range(26, 70);
   if (R.chance(.12)) b.spinP = -b.spinP;
+  if (o.spin) b.spinP = o.spin;
   return b;
+}
+
+function setOrbit(p, a, e, inc, node, peri, period, M0, northward) {
+  const rotY = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0]*c + v[2]*s2, v[1], -v[0]*s2 + v[2]*c]; };
+  const rotX = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0], v[1]*c - v[2]*s2, v[1]*s2 + v[2]*c]; };
+  p.orbit = { a, e, b: a * Math.sqrt(1 - e*e), period, M0,
+    P: rotY(rotX(rotY([1, 0, 0], peri), inc), node), Q: rotY(rotX(rotY([0, 0, northward ? -1 : 1], peri), inc), node) };
+  const pts = new Float32Array(161 * 3);
+  for (let k = 0; k <= 160; k++) { const E = k / 160 * TAU, x = a * (Math.cos(E) - e), z = p.orbit.b * Math.sin(E);
+    pts[k*3] = p.orbit.P[0]*x + p.orbit.Q[0]*z; pts[k*3+1] = p.orbit.P[1]*x + p.orbit.Q[1]*z; pts[k*3+2] = p.orbit.P[2]*x + p.orbit.Q[2]*z; }
+  p.orbit.pts = pts;
+}
+function makeBelt(R, mid, w, T0, a0) {
+  const cnt = 240, d = new Float32Array(cnt * 4);
+  for (let k = 0; k < cnt; k++) { const ba = mid + (R.f() + R.f() - 1) * w; d[k*4] = ba; d[k*4+1] = R.range(0, TAU); d[k*4+2] = TAU / (T0 * Math.pow(ba / a0, 1.5)); d[k*4+3] = R.range(-1, 1) * w * .18; }
+  return { d, cnt, thr: Uint8Array.from({ length: cnt }, () => R.int(40, 230)), col: hsv(R.range(20, 50), .15, .75) };
+}
+
+/* The one hand-built system: type "home" as the seed. Sizes and distances are squeezed to fit a screen;
+   order, tilts, eccentricities, inclinations, spin directions and the sky are the real ones. */
+function generateHome(seed) {
+  const R = RNG('qo:home'), D = Math.PI / 180, s = { seed, name: 'Sol', bodies: [], planets: [] };
+  const star = { kind: 'star', type: 'star', label: 'Yellow star', name: 'Sol', R: 10, col: hsv(44, .5, 1), moons: [], spinP: 90 };
+  makeFrame(star, R, 7.25 * D);
+  star.hot = mix3(star.col, [1, 1, 1], .82); star.midc = mix3(star.col, [1, 1, 1], .3); star.edge = hsv(38, .7, .9); star.nx = R.range(0, 50);
+  s.star = star; s.light = mix3(star.col, [1, 1, 1], .8); s.bodies.push(star);
+
+  const saturnRing = new Float32Array(48), uranusRing = new Float32Array(48);
+  for (let i = 0; i < 48; i++) saturnRing[i] = i < 13 ? .26 : i < 32 ? (i % 5 === 2 ? .78 : .93) : i < 35 ? 0 : i === 35 ? .3 : i === 44 ? .12 : i < 47 ? .7 : .3; // C, B, Cassini division, A with the Encke gap
+  for (const i of [5, 6, 15, 16, 25, 26, 39, 40, 41, 42]) uranusRing[i] = i > 38 ? .8 : .5;
+  const ringOf = (inner, outer, tab, h, sat) => ({ inner, outer, tab, debris: false, col: hsv(h, sat, .92), col2: hsv(h, sat, .7), ox: 0, spin: .03 });
+  const T0 = 40, a0 = 46;
+  const worlds = [
+    { n: 'Mercury', t: 'barren', r: 1.0, a: 46, e: .206, i: 7.0, tilt: 0.03, o: { h: 32, sat: .07, spin: 110 } },
+    { n: 'Venus', t: 'shroud', r: 1.75, a: 68, e: .007, i: 3.4, tilt: 177.4, o: { h: 46, spin: 160 } },
+    { n: 'Earth', t: 'earth', r: 1.85, a: 92, e: .017, i: 0, tilt: 23.4, o: { lights: true, spin: 44 },
+      moons: [{ n: 'The Moon', t: 'barren', r: .5, a: 3.3, p: 16, o: { h: 225, sat: .04, label: 'Barren moon' } }] },
+    { n: 'Mars', t: 'desert', r: 1.3, a: 118, e: .093, i: 1.85, tilt: 25.2, o: { h: 16, capLat: .9, cloud: 0, spin: 45, atmo: { h: 22, s: .45, dens: .28, w: .08 } },
+      moons: [{ n: 'Phobos', t: 'barren', r: .17, a: 2.2, p: 6, o: { h: 25, sat: .1 } }, { n: 'Deimos', t: 'barren', r: .13, a: 3.5, p: 13, o: { h: 30, sat: .1 } }] },
+    { n: 'Jupiter', t: 'gas', r: 5, a: 192, e: .049, i: 1.3, tilt: 3.1, o: { h: 28, nb: 13, turb: .8, accent: -18, spin: 15, storm: { lat: -22, r: .2, red: true } },
+      moons: [{ n: 'Io', t: 'desert', r: .5, a: 2.2, p: 7, o: { h: 52, capLat: 2, cloud: 0, atmo: null, label: 'Volcanic moon' } }, { n: 'Europa', t: 'ice', r: .43, a: 2.9, p: 14, o: { h: 200, cloud: 0, atmo: null } },
+        { n: 'Ganymede', t: 'barren', r: .72, a: 3.8, p: 28, o: { h: 30, sat: .1 } }, { n: 'Callisto', t: 'barren', r: .66, a: 5, p: 65, o: { h: 25, sat: .14 } }] },
+    { n: 'Saturn', t: 'gas', r: 4.3, a: 252, e: .057, i: 2.5, tilt: 26.7, ring: ringOf(1.24, 2.3, saturnRing, 40, .24), o: { h: 42, nb: 11, turb: .45, sat: .7, contrast: .6, accent: 12, spin: 17, storm: null },
+      moons: [{ n: 'Enceladus', t: 'ice', r: .3, a: 2.9, p: 9, o: { h: 205, cloud: 0, atmo: null } }, { n: 'Rhea', t: 'barren', r: .4, a: 3.6, p: 16, o: { h: 220, sat: .04 } },
+        { n: 'Titan', t: 'shroud', r: .7, a: 4.6, p: 34, o: { h: 32, atmo: { h: 30, s: .5, dens: .85, w: .26 }, label: 'Shrouded moon' } }] },
+    { n: 'Uranus', t: 'gas', r: 3.2, a: 312, e: .046, i: .8, tilt: 97.8, ring: ringOf(1.6, 2.05, uranusRing, 190, .12), o: { h: 198, nb: 8, turb: .2, sat: 1.1, contrast: .18, lift: .16, accent: 10, spin: 24, storm: null },
+      moons: [{ n: 'Titania', t: 'barren', r: .35, a: 2.9, p: 14, o: { h: 30, sat: .06 } }, { n: 'Oberon', t: 'barren', r: .34, a: 3.8, p: 21, o: { h: 15, sat: .08 } }] },
+    { n: 'Neptune', t: 'gas', r: 3.1, a: 368, e: .01, i: 1.8, tilt: 28.3, o: { h: 222, nb: 9, turb: .7, sat: 1.6, contrast: .6, accent: -14, spin: 22, storm: { lat: -20, r: .17 } },
+      moons: [{ n: 'Triton', t: 'ice', r: .42, a: 3, p: -15, o: { h: 345, cloud: 0, atmo: null } }] }, // Triton runs backwards
+  ];
+  for (const w of worlds) {
+    const p = makeWorld(R, w.t, w.r, false, w.o);
+    p.name = w.n; makeFrame(p, R, w.tilt * D); if (w.ring) p.ring = w.ring;
+    setOrbit(p, w.a, w.e, w.i * D, R.range(0, TAU), R.range(0, TAU), T0 * Math.pow(w.a / a0, 1.5), R.range(0, TAU), true);
+    for (const mw of w.moons || []) {
+      const m = makeWorld(R, mw.t, mw.r, true, mw.o);
+      if (!mw.o.label) m.label = m.label.replace('world', 'moon');
+      m.name = mw.n; m.parent = p; makeFrame(m, R, R.range(0, .1));
+      m.orbit = { a: mw.a * w.r, period: mw.p, M0: R.range(0, TAU) };
+      p.moons.push(m); s.bodies.push(m);
+    }
+    s.planets.push(p); s.bodies.push(p);
+  }
+  s.aMax = 368; s.rMin = 1;
+  s.belt = makeBelt(R, 153, 8, T0, a0);
+
+  // the real sky, turned from equatorial to ecliptic coordinates so it sits right against the orbits
+  const ce = Math.cos(23.44 * D), se = Math.sin(23.44 * D);
+  const eq = (raH, dec) => { const ra = raH * 15 * D, c = Math.cos(dec * D), x = c * Math.cos(ra), y = c * Math.sin(ra), z = Math.sin(dec * D); return norm([x, -y * se + z * ce, -(y * ce + z * se)]); };
+  const fig = (stars, edges) => ({ pts: stars.map((q, i) => ({ d: eq(q[0], q[1]), g: q[2] || .9, thr: 30 + (i * 37) % 80 })), edges });
+  const figures = [
+    fig([[11.062, 61.75, 1], [11.031, 56.38], [11.897, 53.69], [12.257, 57.03, .8], [12.900, 55.96, 1], [13.399, 54.93], [13.792, 49.31, 1]], [[0,1],[1,2],[2,3],[3,0],[3,4],[4,5],[5,6]]), // the Plough
+    fig([[5.919, 7.41, 1], [5.418, 6.35], [5.679, -1.94], [5.604, -1.20], [5.533, -0.30], [5.796, -9.67], [5.242, -8.20, 1]], [[0,1],[0,2],[1,4],[2,3],[3,4],[2,5],[4,6],[5,6]]), // Orion
+    fig([[0.153, 59.15], [0.675, 56.54], [0.945, 60.72], [1.430, 60.24], [1.907, 63.67, .8]], [[0,1],[1,2],[2,3],[3,4]]), // Cassiopeia
+    fig([[12.443, -63.10, 1], [12.519, -57.11], [12.795, -59.69], [12.252, -58.75, .8]], [[0,1],[2,3]]), // the Southern Cross
+    fig([[20.690, 45.28, 1], [20.370, 40.26], [19.512, 27.96], [20.770, 33.97], [19.750, 45.13]], [[0,1],[1,2],[1,3],[1,4]]), // Cygnus
+  ];
+  makeSky(s, R, eq(12.857, 27.13), figures); // Milky Way lies around the galactic pole
+  s.sky.amount = .36;
+  return s;
 }
 
 let sys = null;
 function generate(seed) {
+  if (/^home$/i.test(String(seed).trim())) return generateHome(seed);
   const R = RNG('qo:' + seed), s = { seed, bodies: [], planets: [] };
   s.name = R.pick(SYL_A) + R.pick(SYL_B) + R.pick(SYL_C);
   if (s.name.length < 5) s.name += R.pick(SYL_B);
@@ -572,14 +710,7 @@ function generate(seed) {
     makeFrame(p, R, ringed ? R.range(.22, .6) : R.chance(.1) ? R.range(.6, 1.3) : R.range(0, .42));
     if (ringed) p.ring = makeRing(R, R.range(0, 360));
     const e = R.range(0, .1), inc = R.range(-.07, .07), node = R.range(0, TAU), peri = R.range(0, TAU);
-    const rotY = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0]*c + v[2]*s2, v[1], -v[0]*s2 + v[2]*c]; };
-    const rotX = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0], v[1]*c - v[2]*s2, v[1]*s2 + v[2]*c]; };
-    p.orbit = { a, e, b: a * Math.sqrt(1 - e*e), period: T0 * Math.pow(a / a0, 1.5), M0: R.range(0, TAU),
-      P: rotY(rotX(rotY([1, 0, 0], peri), inc), node), Q: rotY(rotX(rotY([0, 0, 1], peri), inc), node) };
-    const pts = new Float32Array(161 * 3);
-    for (let k = 0; k <= 160; k++) { const E = k / 160 * TAU, x = a * (Math.cos(E) - e), z = p.orbit.b * Math.sin(E);
-      pts[k*3] = p.orbit.P[0]*x + p.orbit.Q[0]*z; pts[k*3+1] = p.orbit.P[1]*x + p.orbit.Q[1]*z; pts[k*3+2] = p.orbit.P[2]*x + p.orbit.Q[2]*z; }
-    p.orbit.pts = pts;
+    setOrbit(p, a, e, inc, node, peri, T0 * Math.pow(a / a0, 1.5), R.range(0, TAU), false);
     // moons
     const mc = type === 'gas' ? R.int(1, 4) : R.weighted([[0, 4.5], [1, 4], [2, 1.5]]);
     let ma = (p.ring ? p.ring.outer + .5 : 2.3) + R.range(0, .6);
@@ -602,13 +733,13 @@ function generate(seed) {
   // asteroid belt between two worlds
   if (n >= 4 && R.chance(.4)) {
     const i = R.int(1, n - 2), a1 = s.planets[i].orbit.a, a2 = s.planets[i + 1].orbit.a, mid = (a1 + a2) / 2, w = (a2 - a1) * .16;
-    const cnt = 240, d = new Float32Array(cnt * 4);
-    for (let k = 0; k < cnt; k++) { const ba = mid + (R.f() + R.f() - 1) * w; d[k*4] = ba; d[k*4+1] = R.range(0, TAU); d[k*4+2] = TAU / (T0 * Math.pow(ba / a0, 1.5)); d[k*4+3] = R.range(-1, 1) * w * .18; }
-    s.belt = { d, cnt, thr: Uint8Array.from({ length: cnt }, () => R.int(40, 230)), col: hsv(R.range(20, 50), .15, .75) };
+    s.belt = makeBelt(R, mid, w, T0, a0);
   }
 
-  // sky: haze, stars, figures
-  const gn = norm([R.range(-1, 1), R.range(.2, 1), R.range(-1, 1)]);
+  makeSky(s, R, norm([R.range(-1, 1), R.range(.2, 1), R.range(-1, 1)]), null);
+  return s;
+}
+function makeSky(s, R, gn, figures) { // haze, stars, figures
   s.sky = { gn, ox: R.range(-40, 40), oy: R.range(-40, 40), oz: R.range(-40, 40), amount: R.chance(.3) ? 0 : R.range(.3, .62) };
   const NS = 3400, st = { n: NS, dir: new Float32Array(NS * 3), col: new Float32Array(NS * 3), thr: new Uint8Array(NS), big: new Uint8Array(NS), tw: new Float32Array(NS * 2) };
   for (let i = 0; i < NS; i++) {
@@ -621,8 +752,8 @@ function generate(seed) {
     st.tw[i*2] = R.chance(.3) ? R.range(.6, 2.2) : 0; st.tw[i*2+1] = R.range(0, TAU);
   }
   s.stars = st;
-  s.figures = [];
-  for (let k = 0; k < 30; k++) {
+  s.figures = figures || [];
+  for (let k = 0; k < 30 && !figures; k++) {
     const c = norm([R.range(-1, 1), R.range(-1, 1), R.range(-1, 1)]);
     const u = norm(cross(c, Math.abs(c[1]) < .9 ? [0, 1, 0] : [1, 0, 0])), v = cross(c, u);
     const cnt = R.int(4, 7), pts = [], spread = R.range(.09, .15); let guard = 0;
@@ -637,7 +768,6 @@ function generate(seed) {
     if (pts.length > 4 && R.chance(.3)) edges.push([inTree[inTree.length - 1], inTree[0]]);
     s.figures.push({ pts, edges });
   }
-  return s;
 }
 
 /* ───────────── camera ───────────── */
@@ -649,7 +779,7 @@ const YAW_RATE = 0.021;
 function fitSystem() {
   const a = sys.aMax * 1.08;
   overviewDist = Math.max(a * F / (0.47 * W), a * 0.62 * F / (0.4 * H)) * 1.04;
-  bodyScale = clamp(3.9 / (sys.rMin * F / overviewDist), 1.4, 9);
+  bodyScale = clamp(3.9 / (sys.rMin * F / overviewDist), 1.4, 7.5);
 }
 function focusDist(b) {
   let rpx = (b.kind === 'star' ? 0.2 : b.kind === 'moon' ? 0.19 : 0.25) * MINWH;
@@ -693,13 +823,13 @@ function updateCamera(dt) {
 
 /* ───────────── simulation ───────────── */
 function updateBodies() {
-  const sc = 1 + (bodyScale - 1) * cam.o;
   sys.star.Re = sys.star.R * (1 + (bodyScale - 1) * 0.22 * cam.o);
   for (const p of sys.planets) {
     const o = p.orbit, M = o.M0 + TAU * time / o.period; let E = M;
     for (let i = 0; i < 4; i++) E -= (E - o.e * Math.sin(E) - M) / (1 - o.e * Math.cos(E));
     const x = o.a * (Math.cos(E) - o.e), z = o.b * Math.sin(E);
     p.pos[0] = o.P[0]*x + o.Q[0]*z; p.pos[1] = o.P[1]*x + o.Q[1]*z; p.pos[2] = o.P[2]*x + o.Q[2]*z;
+    const sc = p.sc = 1 + (bodyScale - 1) * cam.o * Math.sqrt(sys.rMin / p.R);
     p.Re = p.R * sc;
     for (const m of p.moons) {
       const mo = m.orbit, ang = mo.M0 + TAU * time / mo.period, c = Math.cos(ang) * mo.a * sc, s2 = Math.sin(ang) * mo.a * sc;
@@ -889,7 +1019,7 @@ function drawBody(b) {
         }
         const li = (0.76 + 0.24 * smooth(0.5, 0.6, ndl)) * sh, glow = 1 - k * 0.8;
         let cr = nt[0] + (R0 * lt[0] * li - nt[0]) * k + E0 * glow, cg = nt[1] + (G0 * lt[1] * li - nt[1]) * k + E1 * glow, cb = nt[2] + (B0 * lt[2] * li - nt[2]) * k + E2 * glow;
-        if (sp && sh > 0.9 && k > 0.9) { const nh = dx*hx + dy*hy + dz*hz; if (nh > 0.988) { cr += lt[0]*.75; cg += lt[1]*.75; cb += lt[2]*.75; } else if (nh > 0.968) { cr += lt[0]*.2; cg += lt[1]*.2; cb += lt[2]*.2; } }
+        if (sp && sh > 0.9 && k > 0.9) { const nh = dx*hx + dy*hy + dz*hz; if (nh > 0.9955) { cr += lt[0]*.75; cg += lt[1]*.75; cb += lt[2]*.75; } }
         if (at) { let rim = 1 - dz; rim *= rim; const ha = at.dens * (0.1 + 0.9 * rim) * clamp(ndl * 1.5 + 0.42, 0, 1);
           cr += (acr - cr) * ha; cg += (acg - cg) * ha; cb += (acb - cb) * ha; }
         buf[i] = cr; buf[i+1] = cg; buf[i+2] = cb; thrOv[p] = 0; depth[p] = zs;
@@ -938,7 +1068,7 @@ function drawOrbits() {
   for (const p of sys.planets) {
     if (cam.o > 0.3 || cam.focus === p || (cam.focus && cam.focus.parent === p)) drawPath(p.orbit.pts, 161, q[0], q[1], q[2]);
     if (cam.o < 0.5 && p.moons.length && p.vis && p.rpx > 6) {
-      const sc = 1 + (bodyScale - 1) * cam.o;
+      const sc = p.sc;
       for (const mo of p.moons) { const a = mo.orbit.a * sc;
         for (let k = 0; k <= 64; k++) { const ang = k / 64 * TAU, c = Math.cos(ang) * a, s2 = Math.sin(ang) * a;
           orbBuf[k*3] = p.pos[0] + p.e1[0]*c + p.e2[0]*s2; orbBuf[k*3+1] = p.pos[1] + p.e1[1]*c + p.e2[1]*s2; orbBuf[k*3+2] = p.pos[2] + p.e1[2]*c + p.e2[2]*s2; }
@@ -1161,7 +1291,7 @@ function start() {
 }
 // small hook for tinkering from the console
 window.quietOrbits = { visit: s => warp(s), focus: i => setFocus(i < 0 ? null : sys.planets[i] || sys.star), get system() { return sys; },
-  _step: (dt, n) => { for (let i = 0; i < (n || 1); i++) step(dt); render(); }, _load: s => { loadSystem(String(s)); fade = 1; }, _gen: s => generate(String(s)), _settle: () => { fade = 1; cam.tr = null; labelT = 5; }, _set: (k, v) => { S[k] = v; applyPalette(); buildThr(); syncUI(); } };
+  _step: (dt, n) => { for (let i = 0; i < (n || 1); i++) step(dt); render(); }, _probe: (b, x, y, z) => { b.surf(x, y, z, 4); return [sR, sG, sB, sSpec, sTag]; }, _load: s => { loadSystem(String(s)); fade = 1; }, _gen: s => generate(String(s)), _settle: () => { fade = 1; cam.tr = null; labelT = 5; }, _set: (k, v) => { S[k] = v; applyPalette(); buildThr(); syncUI(); } };
 start();
 })();
 </script>
