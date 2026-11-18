@@ -1046,8 +1046,7 @@ function loadSystem(seed) {
 
 let last = 0, dragging = false;
 function frame(ts) {
-  requestAnimationFrame(frame);
-  if (ts - last < 30) return;
+  requestAnimationFrame(frame); // one render per display refresh
   const dt = Math.min(0.1, (ts - last) / 1000) * (reducedMotion ? 0.4 : 1); last = ts;
   step(dt); render();
 }
