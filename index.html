@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quiet Orbits</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap">
+<style>
+/* Layout: one full-bleed low-res sky; a single control strip docked to the bottom edge that steps away when idle. */
+:root{
+  color-scheme: dark;
+  --ink:#1d1a26;      /* space, panel ground (follows the active palette) */
+  --lit:#f1e9cf;      /* text, borders */
+  --mid:#6f6a86;      /* quiet labels, dividers */
+  --accent:#c98a6b;   /* focus, pressed state */
+  --font-ui:'Silkscreen','Lucida Console',ui-monospace,'Courier New',monospace;
+}
+html,body{height:100%}
+body{
+  margin:0;background:var(--ink);color:var(--lit);font-family:var(--font-ui);
+  font-size:11px;line-height:1.2;overflow:hidden;
+  -webkit-font-smoothing:none;font-smooth:never;
+}
+#sky{
+  position:fixed;left:0;top:0;display:block;
+  image-rendering:pixelated;image-rendering:crisp-edges;image-rendering:pixelated;
+  touch-action:none;cursor:grab;
+}
+body.idle #sky{cursor:none}
+body.dragging #sky{cursor:grabbing}
+
+.hud{
+  position:fixed;left:0;right:0;bottom:0;z-index:5;
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 18px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:10px calc(10px + env(safe-area-inset-bottom,0px));
+  background:var(--ink);border-top:2px solid var(--lit);
+  transition:transform .35s steps(7,end);
+}
+body.idle .hud:not(:focus-within){transform:translateY(105%)}
+@media (prefers-reduced-motion:reduce){.hud{transition:none}}
+
+.grp{display:flex;flex-direction:column;gap:4px;min-width:0}
+.grp > .lbl{color:var(--mid);letter-spacing:.12em;text-transform:uppercase;font-size:10px}
+.row{display:flex;gap:4px;align-items:stretch;flex-wrap:wrap}
+.brand{font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0;align-self:center;white-space:nowrap}
+.brand small{display:block;font-weight:400;font-size:10px;letter-spacing:.1em;color:var(--mid);margin-top:3px}
+
+button,input[type=text]{
+  font:inherit;color:var(--lit);background:var(--ink);
+  border:2px solid var(--lit);border-radius:0;
+  padding:4px 7px;min-height:26px;margin:0;
+  text-transform:uppercase;letter-spacing:.06em;
+}
+button{cursor:pointer;white-space:nowrap}
+button:hover{background:var(--lit);color:var(--ink)}
+button:active{background:var(--accent);border-color:var(--accent);color:var(--ink)}
+button[aria-pressed="true"]{background:var(--lit);color:var(--ink)}
+button[aria-pressed="false"]{border-color:var(--mid);color:var(--mid)}
+button[aria-pressed="false"]:hover{background:var(--mid);color:var(--ink)}
+button.name{min-width:9.5em;text-align:center}
+input[type=text]{width:11em;text-transform:lowercase;cursor:text}
+input[type=text]::selection{background:var(--lit);color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:12px;background:transparent;margin:0;display:block;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--mid)}
+input[type=range]::-moz-range-track{height:4px;background:var(--mid)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:8px;height:12px;margin-top:-4px;background:var(--lit);border:0;border-radius:0}
+input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);border:0;border-radius:0}
+
+#swatch{display:flex;height:6px;border:2px solid var(--lit)}
+#swatch i{flex:1;display:block}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+
+<canvas id="sky" role="img" aria-label="A slowly drifting, procedurally generated solar system drawn in a limited pixel palette"></canvas>
+
+<div class="hud" id="hud">
+  <p class="brand">Quiet Orbits<small>drag to turn · tap a world</small></p>
+
+  <form class="grp" id="seed-form" autocomplete="off">
+    <label class="lbl" for="seed">Seed</label>
+    <div class="row">
+      <input type="text" id="seed" maxlength="40" spellcheck="false" autocapitalize="off" aria-describedby="seed-help">
+      <button type="submit" id="btn-go" title="Visit this seed (Enter)">Go</button>
+      <button type="button" id="btn-roll" title="Random system (Space)">Roll</button>
+    </div>
+    <span class="sr" id="seed-help">Any text. The same seed always makes the same system.</span>
+  </form>
+
+  <div class="grp">
+    <span class="lbl" id="l-pal">Palette</span>
+    <div class="row" role="group" aria-labelledby="l-pal">
+      <button type="button" id="pal-prev" aria-label="Previous palette">&lt;</button>
+      <button type="button" id="pal-name" class="name" title="Next palette (P)"></button>
+      <button type="button" id="pal-next" aria-label="Next palette">&gt;</button>
+    </div>
+    <div id="swatch" aria-hidden="true"></div>
+  </div>
+
+  <div class="grp">
+    <span class="lbl" id="l-dit">Dither</span>
+    <div class="row" role="group" aria-labelledby="l-dit">
+      <button type="button" id="dit-prev" aria-label="Previous dither pattern">&lt;</button>
+      <button type="button" id="dit-name" class="name" title="Next dither pattern (D)"></button>
+      <button type="button" id="dit-next" aria-label="Next dither pattern">&gt;</button>
+    </div>
+    <input type="range" id="dit-amt" min="0" max="100" step="5" aria-label="Dither amount">
+  </div>
+
+  <div class="grp">
+    <span class="lbl">Pixels</span>
+    <button type="button" id="px" title="Pixel size (X)"></button>
+  </div>
+
+  <div class="grp">
+    <span class="lbl">Journey</span>
+    <button type="button" id="mode" title="Wander: tour, then drift to a new system. Tour: stay in this system. Still: hold this view. (M)"></button>
+  </div>
+
+  <div class="grp">
+    <span class="lbl" id="l-world">World</span>
+    <div class="row" role="group" aria-labelledby="l-world">
+      <button type="button" id="w-prev" aria-label="Previous world">&lt;</button>
+      <button type="button" id="w-sys" title="Whole system (Esc)">System</button>
+      <button type="button" id="w-next" aria-label="Next world">&gt;</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <span class="lbl" id="l-show">Show</span>
+    <div class="row" role="group" aria-labelledby="l-show">
+      <button type="button" id="t-orb" aria-pressed="true" title="Orbit lines (O)">Orbits</button>
+      <button type="button" id="t-con" aria-pressed="true" title="Constellation lines (C)">Figures</button>
+      <button type="button" id="t-lab" aria-pressed="true" title="Name captions (L)">Names</button>
+      <button type="button" id="btn-full" title="Fullscreen (F)">Full</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ───────────── small maths ───────────── */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { x = clamp((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); };
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l]; };
+const wrapPi = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+
+/* ───────────── seeded randomness ───────────── */
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; }
+  return () => { h = Math.imul(h ^ h >>> 16, 2246822507); h = Math.imul(h ^ h >>> 13, 3266489909); return (h ^= h >>> 16) >>> 0; };
+}
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function RNG(seed) {
+  const f = mulberry32(xmur3(String(seed))());
+  const r = {
+    f,
+    range: (a, b) => a + (b - a) * f(),
+    int: (a, b) => a + Math.floor(f() * (b - a + 1)),
+    pick: arr => arr[Math.floor(f() * arr.length)],
+    chance: p => f() < p,
+    weighted(items) { let s = 0; for (const it of items) s += it[1]; let x = f() * s; for (const it of items) { x -= it[1]; if (x <= 0) return it[0]; } return items[items.length - 1][0]; },
+    shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(f() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+  };
+  return r;
+}
+
+/* ───────────── noise ───────────── */
+const PERM = new Uint8Array(512);
+{ const r = mulberry32(90210), p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = p[i]; p[i] = p[j]; p[j] = t; }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255]; }
+function grad(h, x, y, z) {
+  h &= 15; const u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+  return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+}
+function noise3(x, y, z) {
+  let X = Math.floor(x), Y = Math.floor(y), Z = Math.floor(z);
+  x -= X; y -= Y; z -= Z; X &= 255; Y &= 255; Z &= 255;
+  const u = x*x*x*(x*(x*6-15)+10), v = y*y*y*(y*(y*6-15)+10), w = z*z*z*(z*(z*6-15)+10);
+  const A = PERM[X] + Y, AA = PERM[A] + Z, AB = PERM[A+1] + Z, B = PERM[X+1] + Y, BA = PERM[B] + Z, BB = PERM[B+1] + Z;
+  const x1 = x - 1, y1 = y - 1, z1 = z - 1;
+  const a0 = grad(PERM[AA], x, y, z), a1 = grad(PERM[BA], x1, y, z);
+  const b0 = grad(PERM[AB], x, y1, z), b1 = grad(PERM[BB], x1, y1, z);
+  const c0 = grad(PERM[AA+1], x, y, z1), c1 = grad(PERM[BA+1], x1, y, z1);
+  const d0 = grad(PERM[AB+1], x, y1, z1), d1 = grad(PERM[BB+1], x1, y1, z1);
+  const p0 = a0 + u*(a1-a0), p1 = b0 + u*(b1-b0), p2 = c0 + u*(c1-c0), p3 = d0 + u*(d1-d0);
+  const q0 = p0 + v*(p1-p0), q1 = p2 + v*(p3-p2);
+  return q0 + w*(q1-q0);
+}
+function fbm(x, y, z, oct) {
+  let a = 0.5, s = 0, n = 0;
+  for (let i = 0; i < oct; i++) { s += a * noise3(x, y, z); n += a; x = x*2.03 + 11.3; y = y*2.03 + 7.7; z = z*2.03 + 3.1; a *= 0.5; }
+  return s / n;
+}
+function hash3(i, j, k) {
+  let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(k, 1440662683);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); return (h ^ (h >>> 16)) >>> 0;
+}
+
+/* ───────────── colour ───────────── */
+const s2l = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+function hsv(h, s, v) {
+  h = (((h % 360) + 360) % 360) / 60; const i = h | 0, f = h - i, p = v*(1-s), q = v*(1-s*f), t = v*(1-s*(1-f));
+  let r, g, b;
+  switch (i) { case 0: r=v; g=t; b=p; break; case 1: r=q; g=v; b=p; break; case 2: r=p; g=v; b=t; break;
+    case 3: r=p; g=q; b=v; break; case 4: r=t; g=p; b=v; break; default: r=v; g=p; b=q; }
+  return [s2l(r), s2l(g), s2l(b)];
+}
+const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+const mul3 = (a, k) => [a[0]*k, a[1]*k, a[2]*k];
+
+/* ───────────── palettes (dark → light, hand-tuned) ───────────── */
+const PALETTES = [
+  { name: 'Dustlight', c: ['#2b2530','#4c4760','#526f8c','#8a5566','#8f9a6c','#c9a36e','#bcdbe0','#f3ecc8'] },
+  { name: 'Orrery',    c: ['#0d0d1d','#24315f','#2f7c86','#6aae69','#d8b25a','#b4513d','#d6d0c3','#fdf8ea'] },
+  { name: 'Tidepool',  c: ['#081019','#12324f','#1d6c80','#62c2b3','#e8f5dc'] },
+  { name: 'Moss',      c: ['#101c14','#2c5637','#7aa856','#dbe8ae'] },
+  { name: 'Kiln',      c: ['#190e13','#662331','#d55c38','#f6d79c'] },
+  { name: 'Nocturne',  c: ['#130c21','#3a2052','#853b70','#dd676a','#f3b178','#fbeed3'] },
+  { name: 'Regolith',  c: ['#0b0c11','#2c303f','#696e80','#b1b4c0','#f1efe9'] },
+  { name: 'Sorbet',    c: ['#1c1129','#4a2e73','#c5428d','#ff8c6b','#ffd66d','#70dfc2','#4b8ed8','#f8f4ff'] },
+  { name: 'Phosphor',  c: ['#130b00','#7a3b00','#e08a00','#ffd98a'] },
+  { name: 'Permafrost',c: ['#0a1023','#263d6c','#5b8abe','#a8d5e7','#f4fbff'] },
+  { name: 'Oxide',     c: ['#150d0d','#46221e','#8b4a30','#7b8d78','#c88a4c','#e9dab7'] },
+  { name: 'Eclipse',   c: ['#0c0509','#8a1d2c','#f1e3cf'] },
+  { name: 'One Bit',   c: ['#0c0c14','#e9e6d6'] },
+  { name: 'Almanac',   c: ['#efe6cf','#b9ad90','#8e4a3a','#29273a'], invert: true },
+  { name: 'Spectrum',  c: ['#0e0c1b','#2a2247','#4e3b78','#24415d','#2e6e73','#4ea569','#a8d05c','#f1e17a','#efa74a','#d8623b','#a7333f','#6d2648','#896a5b','#c8b19b','#9ed3df','#fbf7ea'] },
+];
+for (const p of PALETTES) {
+  p.rgb = p.c.map(h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]);
+  p.lin = p.rgb.map(c => [s2l(c[0]/255), s2l(c[1]/255), s2l(c[2]/255)]);
+  p.gam = p.lin.map(c => [Math.sqrt(c[0]), Math.sqrt(c[1]), Math.sqrt(c[2])]);
+  p.u32 = Uint32Array.from(p.rgb, c => (255 << 24 | c[2] << 16 | c[1] << 8 | c[0]) >>> 0);
+}
+
+/* Colour lookup: for every scene colour, the two palette entries that best mix to it and the mix ratio. */
+const LN = 40, LN1 = LN - 1;
+const lutA = new Uint8Array(LN*LN*LN), lutB = new Uint8Array(LN*LN*LN), lutT = new Uint8Array(LN*LN*LN);
+function gdist(a, r, g, b) {
+  const dr = a[0]-r, dg = a[1]-g, db = a[2]-b, dy = 0.3*dr + 0.59*dg + 0.11*db;
+  return 0.3*dr*dr + 0.59*dg*dg + 0.11*db*db + dy*dy;
+}
+function buildLUT(pal) {
+  const n = pal.lin.length, lin = pal.lin, gam = pal.gam, d = new Float32Array(n), cand = [0,0,0,0];
+  const luma = gam.map(c => 0.3*c[0] + 0.59*c[1] + 0.11*c[2]);
+  // scene black lands on the palette's ground colour and scene white on its far end
+  const seq = luma.map((_, i) => i).sort((a, b) => luma[a] - luma[b]); if (pal.invert) seq.reverse();
+  const D = gam[seq[0]], Lt = gam[seq[n - 1]];
+  const unmap = c => [0, 1, 2].map(k => { const sp = Lt[k] - D[k]; const v = Math.abs(sp) < 1e-4 ? 0 : clamp((c[k] - D[k]) / sp, 0, 1); return v * v; });
+  pal.seq = seq;
+  pal.night = n >= 3 ? unmap(gam[seq[1]]) : [0, 0, 0];
+  pal.midc = n >= 3 ? unmap(gam[seq[Math.ceil((n - 1) / 2)]]) : [1, 1, 1];
+  let cell = 0;
+  for (let ri = 0; ri < LN; ri++) for (let gi = 0; gi < LN; gi++) for (let bi = 0; bi < LN; bi++, cell++) {
+    const tr = D[0] + ri/LN1 * (Lt[0] - D[0]), tg = D[1] + gi/LN1 * (Lt[1] - D[1]), tb = D[2] + bi/LN1 * (Lt[2] - D[2]);
+    const lr = tr*tr, lg = tg*tg, lb = tb*tb;
+    for (let i = 0; i < n; i++) d[i] = gdist(gam[i], tr, tg, tb);
+    const k = Math.min(4, n);
+    for (let c = 0; c < k; c++) {
+      let best = -1, bd = 1e9;
+      for (let i = 0; i < n; i++) { if (d[i] < bd) { let used = false; for (let u = 0; u < c; u++) if (cand[u] === i) used = true; if (!used) { bd = d[i]; best = i; } } }
+      cand[c] = best;
+    }
+    let a = cand[0], b = cand[0], t = 0, err = d[cand[0]];
+    for (let i = 0; i < k; i++) for (let j = i + 1; j < k; j++) {
+      const A = lin[cand[i]], B = lin[cand[j]];
+      const dx = B[0]-A[0], dy = B[1]-A[1], dz = B[2]-A[2], l2 = dx*dx + dy*dy + dz*dz;
+      if (l2 < 1e-9) continue;
+      const tt = clamp(((lr-A[0])*dx + (lg-A[1])*dy + (lb-A[2])*dz) / l2, 0, 1);
+      const mr = Math.sqrt(A[0]+tt*dx), mg = Math.sqrt(A[1]+tt*dy), mb = Math.sqrt(A[2]+tt*dz);
+      const dr = mr-tr, dg = mg-tg, db = mb-tb, dl = 0.3*dr + 0.59*dg + 0.11*db;
+      const pg = gam[cand[j]];
+      const e = 0.3*dr*dr + 0.59*dg*dg + 0.11*db*db + dl*dl + 0.11 * gdist(gam[cand[i]], pg[0], pg[1], pg[2]) * 4*tt*(1-tt);
+      if (e < err) { err = e; a = cand[i]; b = cand[j]; t = tt; }
+    }
+    if (luma[a] > luma[b]) { const s = a; a = b; b = s; t = 1 - t; }
+    if (t < 0.09) t = 0; else if (t > 0.91) t = 1; // no stray speckle
+    lutA[cell] = a; lutB[cell] = b; lutT[cell] = Math.round(t * 255);
+  }
+}
+function palLookup(r, g, b) { // linear rgb → palette index, no dither
+  const cell = ((Math.sqrt(r)*LN1 + .5 | 0) * LN + (Math.sqrt(g)*LN1 + .5 | 0)) * LN + (Math.sqrt(b)*LN1 + .5 | 0);
+  return lutT[cell] > 127 ? lutB[cell] : lutA[cell];
+}
+
+/* ───────────── dither patterns ───────────── */
+function bayer(n) {
+  let m = [[0]];
+  while (m.length < n) { const s = m.length, q = [];
+    for (let y = 0; y < s*2; y++) { q.push([]); for (let x = 0; x < s*2; x++) q[y].push(4*m[y % s][x % s] + [[0,2],[3,1]][y < s ? 0 : 1][x < s ? 0 : 1]); }
+    m = q; }
+  return (x, y) => (m[y % n][x % n] + 0.5) / (n*n);
+}
+const B2 = bayer(2), B4 = bayer(4), B8 = bayer(8), SEQ = [0, 2, 1, 3];
+const CLUSTER = [[12,5,6,13],[4,0,1,7],[11,3,2,8],[15,10,9,14]];
+const DITHERS = [
+  { name: 'Bayer 4',  f: B4 },
+  { name: 'Bayer 8',  f: B8 },
+  { name: 'Bayer 2',  f: B2 },
+  { name: 'Halftone', f: (x, y) => (CLUSTER[y & 3][x & 3] + 0.5) / 16 },
+  { name: 'Scanline', f: (x, y) => (SEQ[y & 3]*4 + SEQ[x & 3] + 0.5) / 16 },
+  { name: 'Hatch',    f: (x, y) => (SEQ[(x + y) & 3]*4 + SEQ[(x - y) & 3] + 0.5) / 16 },
+  { name: 'Grain',    f: (x, y) => { const v = 52.9829189 * ((0.06711056*x + 0.00583715*y) % 1); return clamp(v - Math.floor(v), 0.02, 0.98); } },
+  { name: 'None',     f: () => 0.5 },
+];
+const PIXELS = [{ name: 'Chunky', h: 126 }, { name: 'Classic', h: 184 }, { name: 'Fine', h: 270 }];
+const MODES = ['Wander', 'Tour', 'Still'];
+
+/* ───────────── settings ───────────── */
+const S = { pal: 0, dit: 0, amt: 100, px: 1, mode: 0, orbits: true, lines: true, labels: true };
+try { const saved = JSON.parse(localStorage.getItem('quiet-orbits') || 'null');
+  if (saved && typeof saved === 'object') for (const k in S) if (typeof saved[k] === typeof S[k]) S[k] = saved[k];
+} catch (e) {}
+S.pal = clamp(S.pal | 0, 0, PALETTES.length - 1); S.dit = clamp(S.dit | 0, 0, DITHERS.length - 1);
+S.px = clamp(S.px | 0, 0, PIXELS.length - 1); S.mode = clamp(S.mode | 0, 0, MODES.length - 1); S.amt = clamp(S.amt | 0, 0, 100);
+const save = () => { try { localStorage.setItem('quiet-orbits', JSON.stringify(S)); } catch (e) {} };
+const reducedMotion = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
+
+/* ───────────── frame buffers ───────────── */
+const canvas = document.getElementById('sky');
+const ctx = canvas.getContext('2d', { alpha: false });
+let W = 0, H = 0, scale = 1, F = 300, CX = 0, CY = 0, MINWH = 0;
+let buf, depth, thrOv, thrMap, img, out32, skyGrid;
+const GRID = 4; let GW = 0, GH = 0;
+
+function resize() {
+  const ww = Math.max(64, window.innerWidth), wh = Math.max(64, window.innerHeight);
+  const target = PIXELS[S.px].h;
+  scale = Math.max(1, Math.round(Math.sqrt(ww * wh / (target * target * 16 / 9))));
+  W = Math.ceil(ww / scale); H = Math.ceil(wh / scale);
+  canvas.width = W; canvas.height = H;
+  canvas.style.width = W * scale + 'px'; canvas.style.height = H * scale + 'px';
+  buf = new Float32Array(W * H * 3); depth = new Float32Array(W * H); thrOv = new Uint8Array(W * H); thrMap = new Uint8Array(W * H);
+  img = ctx.createImageData(W, H); out32 = new Uint32Array(img.data.buffer);
+  GW = Math.ceil(W / GRID) + 1; GH = Math.ceil(H / GRID) + 1; skyGrid = new Float32Array(GW * GH * 3);
+  MINWH = Math.min(W, H); F = 2 * MINWH; CX = W / 2; CY = H / 2;
+  buildThr();
+  if (sys) fitSystem();
+}
+function buildThr() {
+  const f = DITHERS[S.dit].f, amt = S.amt / 100;
+  for (let y = 0, p = 0; y < H; y++) for (let x = 0; x < W; x++, p++)
+    thrMap[p] = clamp(Math.round(255 * (0.5 + (f(x, y) - 0.5) * amt)), 1, 254);
+}
+
+/* ───────────── surface shaders ─────────────
+   Each returns flat, banded colour for a point on the unit sphere (y is the spin axis).
+   Results land in the s* registers below. */
+let sR = 0, sG = 0, sB = 0, sE0 = 0, sE1 = 0, sE2 = 0, sSpec = 0, sTag = 0;
+const put = c => { sR = c[0]; sG = c[1]; sB = c[2]; };
+
+function mkTerran(R, ocean) {
+  const f = R.range(1.1, 1.9), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const sea = ocean ? R.range(0.09, 0.19) : R.range(-0.09, 0.05);
+  const vegH = R.weighted([[105,4],[130,2],[80,2],[160,1.5],[285,1],[20,1],[335,1]]);
+  const seaH = R.weighted([[212,4],[198,2],[228,2],[180,1.5],[262,1],[150,.7]]);
+  const deep = hsv(seaH, .62, .34), shallow = hsv(seaH - 10, .5, .58);
+  const shore = hsv(vegH - 55, .28, .86), low = hsv(vegH, .46, .62), mid = hsv(vegH + 18, .5, .44);
+  const arid = hsv(vegH - 70, .4, .66), high = hsv(vegH - 80, .2, .5), peak = hsv(seaH, .05, .93);
+  const ice = hsv(seaH - 10, .1, .96), iceLat = R.range(.66, .9);
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    const h = fbm(x*f + ox, y*f + oy, z*f + oz, oct);
+    const lat = y < 0 ? -y : y;
+    if (lat + noise3(x*5 + oz, y*5 + ox, z*5 + oy) * 0.07 > iceLat) return put(ice);
+    if (h < sea) { sSpec = 1; return put(sea - h > 0.085 ? deep : shallow); }
+    const e = h - sea;
+    if (e < 0.016) return put(shore);
+    if (e < 0.085) { sTag = 1; return put(noise3(x*1.7 + oy, y*1.7 + oz, z*1.7 + ox) - lat * 0.32 > -0.12 ? low : arid); }
+    if (e < 0.16) { sTag = 1; return put(mid); }
+    put(e < 0.235 ? high : peak);
+  };
+}
+function mkDesert(R) {
+  const f = R.range(1.2, 2.2), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[28,4],[14,2],[42,2],[350,1],[65,.8]]);
+  const ramp = [hsv(h0, .5, .42), hsv(h0 + 8, .46, .6), hsv(h0 + 14, .38, .76), hsv(h0 - 12, .52, .52), hsv(h0 + 20, .22, .88)];
+  const scar = hsv(h0 - 20, .5, .26), cap = hsv(h0 + 160, .06, .94), capLat = R.chance(.5) ? R.range(.8, .93) : 2;
+  const strata = R.range(7, 12);
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    const lat = y < 0 ? -y : y;
+    if (lat + noise3(x*4 + oz, y*4, z*4 + ox) * 0.06 > capLat) return put(cap);
+    const h = fbm(x*f + ox, y*f + oy, z*f + oz, oct);
+    if (oct > 2 && Math.abs(noise3(x*2.1 + oy, y*2.1 + oz, z*2.1 + ox)) < 0.022) return put(scar);
+    const s = h * strata + y * 1.4 + 40;
+    put(ramp[(s | 0) % 5]);
+  };
+}
+function mkIce(R) {
+  const f = R.range(1.3, 2.1), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[200,4],[185,2],[220,2],[165,1],[250,1]]);
+  const a = hsv(h0, .05, .98), b = hsv(h0 - 6, .26, .9), c = hsv(h0 + 6, .46, .7), crack = hsv(h0 + 15, .58, .42);
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    const h = fbm(x*f + ox, y*f + oy, z*f + oz, oct);
+    if (oct > 2 && h < 0.12 && Math.abs(noise3(x*3 + oy, y*3 + oz, z*3 + ox)) < 0.026) return put(crack);
+    put(h > 0.07 ? a : h > -0.07 ? b : c);
+  };
+}
+function mkLava(R) {
+  const f = R.range(1.3, 2.2), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[16,4],[4,2],[30,2],[320,.6],[190,.4]]);
+  const c0 = hsv(h0 + 200, .25, .16), c1 = hsv(h0 + 190, .2, .27), c2 = hsv(h0, .3, .38);
+  const hot = hsv(h0 + 22, .65, 1), warm = hsv(h0, .88, .82), seaL = R.range(-0.17, -0.07);
+  return (x, y, z, oct) => {
+    sSpec = 0; sTag = 0;
+    const h = fbm(x*f + ox, y*f + oy, z*f + oz, oct);
+    if (h < seaL) { put(c0); const e = h < seaL - 0.05 ? hot : warm; sE0 = e[0]; sE1 = e[1]; sE2 = e[2]; return; }
+    const r = oct > 2 ? Math.abs(noise3(x*f*2.4 + oy, y*f*2.4 + oz, z*f*2.4 + ox)) : 1;
+    if (r < 0.03) { put(c0); sE0 = warm[0]; sE1 = warm[1]; sE2 = warm[2]; return; }
+    sE0 = sE1 = sE2 = 0;
+    put(h > 0.12 ? c2 : h > 0 ? c1 : c0);
+  };
+}
+function mkBarren(R) {
+  const f = R.range(1.4, 2.4), ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[30,3],[220,2],[0,1],[280,1],[60,1]]), sat = R.range(.04, .2);
+  const lite = hsv(h0, sat, .8), mid = hsv(h0, sat, .62), dark = hsv(h0 + 20, sat + .05, .42), pit = hsv(h0 + 20, sat + .05, .3), rim = hsv(h0, sat * .6, .92);
+  const cs = R.range(2.4, 4.2), cseed = R.int(0, 9999);
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    if (oct > 2) { // craters: nearest scattered point, sized per cell
+      const px = x*cs, py = y*cs, pz = z*cs, ix = Math.floor(px), iy = Math.floor(py), iz = Math.floor(pz);
+      let best = 9;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+        const hh = hash3(ix + i + cseed, iy + j, iz + k);
+        if ((hh & 3) === 0) continue;
+        const fx = ix + i + (hh >>> 4 & 255) / 255 - px, fy = iy + j + (hh >>> 12 & 255) / 255 - py, fz = iz + k + (hh >>> 20 & 255) / 255 - pz;
+        const rad = 0.16 + (hh >>> 28) / 15 * 0.3, dn = Math.sqrt(fx*fx + fy*fy + fz*fz) / rad;
+        if (dn < best) best = dn;
+      }
+      if (best < 0.72) return put(pit);
+      if (best < 1) return put(rim);
+    }
+    const h = fbm(x*f + ox, y*f + oy, z*f + oz, oct);
+    put(h > 0.09 ? lite : h > -0.07 ? mid : dark);
+  };
+}
+function mkGas(R) {
+  const ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[28,3],[44,2.5],[212,2.5],[176,2],[282,1.2],[348,1.2],[128,1]]);
+  const ramp = [hsv(h0 - 8, .5, .4), hsv(h0, .48, .58), hsv(h0 + 10, .38, .74), hsv(h0 + 18, .2, .9), hsv(h0 + R.pick([-40, 150, 40]), .42, .6)];
+  const NB = R.int(8, 15), table = []; let prev = -1;
+  for (let i = 0; i < NB + 2; i++) { let v; do { v = R.weighted([[0,2],[1,3],[2,3],[3,2],[4,1]]); } while (v === prev); table.push(prev = v); }
+  const turb = R.range(.4, 1.3);
+  const storm = R.chance(.6) ? { p: norm([R.range(-1, 1), R.range(-.45, .45), R.range(-1, 1)]), r: R.range(.13, .24), c: R.chance(.5) ? ramp[4] : ramp[3] } : null;
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    if (storm) { const dx = x - storm.p[0], dy = (y - storm.p[1]) * 1.9, dz = z - storm.p[2]; if (dx*dx + dy*dy + dz*dz < storm.r * storm.r) return put(storm.c); }
+    const w = fbm(x*.9 + ox, y*3.4 + oy, z*.9 + oz, oct > 3 ? 3 : oct);
+    const v = (y*.5 + .5) * NB + 1 + w * turb * 1.5 + (oct > 2 ? noise3(x*3 + oy, y*12 + oz, z*3 + ox) * 0.22 : 0);
+    put(ramp[table[clamp(v | 0, 0, NB + 1)]]);
+  };
+}
+function mkShroud(R) {
+  const ox = R.range(-60, 60), oy = R.range(-60, 60), oz = R.range(-60, 60);
+  const h0 = R.weighted([[40,3],[25,2],[70,1.5],[300,1],[160,1],[200,1]]);
+  const a = hsv(h0, .34, .88), b = hsv(h0 - 8, .44, .72), c = hsv(h0 - 16, .5, .54);
+  return (x, y, z, oct) => {
+    sE0 = sE1 = sE2 = 0; sSpec = 0; sTag = 0;
+    const w = noise3(x*1.1 + ox, y*1.1 + oy, z*1.1 + oz) * 0.9;
+    const v = fbm(x*1.2 + w + oy, y*2.6 + w + oz, z*1.2 + ox, oct > 4 ? 4 : oct);
+    put(v > 0.06 ? a : v > -0.07 ? b : c);
+  };
+}
+
+const KINDS = {
+  terran: { label: 'Living world', mk: R => mkTerran(R, false), atmo: R => ({ h: R.pick([205, 195, 220, 180]), s: .5, dens: R.range(.5, .75), w: R.range(.14, .22) }), cloud: [.3, .62] },
+  ocean:  { label: 'Ocean world',  mk: R => mkTerran(R, true),  atmo: R => ({ h: R.pick([200, 190, 215, 170]), s: .45, dens: R.range(.55, .8), w: R.range(.15, .24) }), cloud: [.45, .75] },
+  desert: { label: 'Desert world', mk: mkDesert, atmo: R => ({ h: R.pick([28, 18, 40]), s: .4, dens: R.range(.25, .5), w: R.range(.08, .14) }), cloud: [0, .22] },
+  ice:    { label: 'Ice world',    mk: mkIce,    atmo: R => ({ h: R.pick([195, 210, 180]), s: .3, dens: R.range(.15, .4), w: R.range(.05, .1) }), cloud: [0, .2] },
+  lava:   { label: 'Molten world', mk: mkLava,   atmo: R => ({ h: R.pick([12, 24, 355]), s: .6, dens: R.range(.25, .5), w: R.range(.07, .13) }), cloud: [0, 0] },
+  barren: { label: 'Barren world', mk: mkBarren, atmo: null, cloud: [0, 0] },
+  gas:    { label: 'Gas giant',    mk: mkGas,    atmo: R => ({ h: -1, s: .3, dens: R.range(.45, .7), w: R.range(.1, .16) }), cloud: [0, 0] },
+  shroud: { label: 'Shrouded world', mk: mkShroud, atmo: R => ({ h: -1, s: .35, dens: R.range(.8, .95), w: R.range(.22, .34) }), cloud: [0, 0] },
+};
+
+/* ───────────── system generation ───────────── */
+const SYL_A = ['Ka','Vel','Tor','An','Is','Ome','Ru','Sel','Ny','Ar','Eu','Hal','Mi','Or','Tha','Ves','Zeph','Io','Lu','Cae','Bel','Dra','Fen','Gal','Ith','Jun','Kor','Mar','Nev','Oss','Pyr','Quil','Sah','Tam','Ul','Wen','Yl','Ash'];
+const SYL_B = ['ra','lo','ti','ne','mu','sha','do','ri','va','en','ol','ae','ir','um','eth','a','o','i'];
+const SYL_C = ['n','s','x','th','r','lia','nis','ros','ra','tor','phe','dra','mir','lune','ne','','',''];
+const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+const SEED_WORDS = ['vela','lyra','ember','halo','drift','quill','onyx','sable','nimbus','tessel','aurel','cinder','lumen','opal','rook','sorrel','thistle','umbra','wren','zephyr','calyx','mote','fathom','gossamer','hollow','indigo','juniper','kestrel','larkspur','marrow','pallas','saffron','tundra','willow'];
+const randomSeed = () => SEED_WORDS[Math.floor(Math.random() * SEED_WORDS.length)] + '-' + String(Math.floor(Math.random() * 900) + 100);
+
+function makeFrame(b, R, tilt) {
+  const az = R.range(0, TAU), st = Math.sin(tilt), ct = Math.cos(tilt);
+  b.ax = [st * Math.cos(az), ct, st * Math.sin(az)];
+  let e1 = cross(b.ax, [0, 0, 1]); if (Math.hypot(e1[0], e1[1], e1[2]) < 0.05) e1 = cross(b.ax, [1, 0, 0]);
+  b.e1 = norm(e1); b.e2 = cross(b.ax, b.e1);
+  b.spin0 = R.range(0, TAU); b.pos = [0, 0, 0]; b.m = new Float32Array(9); b.lb = [0, 0, 1];
+}
+function avgColor(surf) {
+  const r = mulberry32(7); let a = 0, b = 0, c = 0; const n = 56;
+  for (let i = 0; i < n; i++) { const v = norm([r()*2-1, r()*2-1, r()*2-1]); surf(v[0], v[1], v[2], 3); a += sR + sE0*.3; b += sG + sE1*.3; c += sB + sE2*.3; }
+  return [a/n, b/n, c/n];
+}
+function makeRing(R, tint) {
+  const inner = R.range(1.35, 1.75), outer = inner + R.range(.55, 1.15), tab = new Float32Array(48);
+  const debris = R.chance(.45);
+  let v = R.range(.4, .9);
+  for (let i = 0; i < 48; i++) {
+    if (R.chance(.3)) v = R.chance(.25) ? 0 : R.range(.3, .95);
+    tab[i] = v * smooth(0, 3, i) * smooth(0, 3, 47 - i);
+  }
+  const h = R.chance(.6) ? R.range(28, 48) : tint;
+  return { inner, outer, tab, debris, col: hsv(h, R.range(.12, .34), R.range(.8, .95)), col2: hsv(h + R.pick([-150, 160, 30]), R.range(.2, .4), R.range(.55, .75)), ox: R.range(0, 50), spin: R.range(.02, .05) };
+}
+function makeWorld(R, kindName, radius, isMoon) {
+  const K = KINDS[kindName], b = { kind: isMoon ? 'moon' : 'planet', type: kindName, label: K.label, R: radius, moons: [] };
+  b.surf = K.mk(R);
+  b.avg = avgColor(b.surf);
+  if (K.atmo && !(isMoon && R.chance(.7))) {
+    const a = K.atmo(R); let col;
+    if (a.h < 0) { const m = Math.max(b.avg[0], b.avg[1], b.avg[2]) || 1; col = mix3(mul3(b.avg, .85 / m), [1, 1, 1], .35); }
+    else col = hsv(a.h, a.s, 1);
+    b.atmo = { col, dens: a.dens, w: a.w };
+  } else b.atmo = null;
+  const cv = R.range(K.cloud[0], K.cloud[1]);
+  b.cloud = cv > 0.12 && !isMoon ? { thr: lerp(.2, -.1, cv), f: R.range(1.5, 2.4), ox: R.range(-40, 40), oz: R.range(-40, 40), rate: R.range(.008, .02) * (R.chance(.5) ? 1 : -1),
+    col: hsv(R.pick([40, 200, 0]), .04, .98), col2: hsv(210, .12, .82) } : null;
+  b.lights = kindName === 'terran' && R.chance(.16);
+  b.spinP = kindName === 'gas' ? R.range(14, 26) : R.range(26, 70);
+  if (R.chance(.12)) b.spinP = -b.spinP;
+  return b;
+}
+
+let sys = null;
+function generate(seed) {
+  const R = RNG('qo:' + seed), s = { seed, bodies: [], planets: [] };
+  s.name = R.pick(SYL_A) + R.pick(SYL_B) + R.pick(SYL_C);
+  if (s.name.length < 5) s.name += R.pick(SYL_B);
+
+  // star
+  const cls = R.weighted([[{ n: 'Red dwarf', h: 8, s: .78, r: [6, 8] }, 3], [{ n: 'Orange star', h: 24, s: .68, r: [7, 10] }, 3],
+    [{ n: 'Yellow star', h: 44, s: .55, r: [8, 11] }, 3], [{ n: 'White star', h: 52, s: .1, r: [8, 12] }, 2], [{ n: 'Blue star', h: 214, s: .4, r: [10, 13.5] }, 1]]);
+  const star = { kind: 'star', type: 'star', label: cls.n, name: s.name, R: R.range(cls.r[0], cls.r[1]), col: hsv(cls.h, cls.s, 1), moons: [], spinP: R.range(60, 110) };
+  makeFrame(star, R, R.range(0, .2));
+  star.hot = mix3(star.col, [1, 1, 1], .82); star.midc = mix3(star.col, [1, 1, 1], .3); star.edge = mul3(hsv(cls.h - 6, Math.min(1, cls.s + .2), .9), 1);
+  star.nx = R.range(0, 50);
+  s.star = star; s.light = mix3(star.col, [1, 1, 1], .8); s.bodies.push(star);
+
+  // planets
+  const n = R.int(3, 8), bump = (t, c, w) => Math.exp(-(((t - c) / w) ** 2));
+  let a = star.R * 3 + R.range(10, 16);
+  const T0 = R.range(46, 70), a0 = a;
+  for (let i = 0; i < n; i++) {
+    const t = n > 1 ? i / (n - 1) : 0.4;
+    const type = R.weighted([['lava', Math.max(0, 1 - t * 4) * 2.2], ['barren', .8], ['desert', 1.3 * bump(t, .25, .25)], ['terran', 1.7 * bump(t, .4, .22)],
+      ['ocean', 1.2 * bump(t, .47, .22)], ['shroud', .7 * bump(t, .3, .2) + .5 * bump(t, .72, .2)], ['gas', 2 * smooth(.3, .62, t)], ['ice', 1.6 * smooth(.5, .95, t)]]);
+    const rad = type === 'gas' ? R.range(3.1, 5) : R.range(1.05, 2.25);
+    const p = makeWorld(R, type, rad, false);
+    p.name = s.name + ' ' + ROMAN[i];
+    const ringed = R.chance(type === 'gas' ? .25 : type === 'ice' ? .06 : .03);
+    makeFrame(p, R, ringed ? R.range(.22, .6) : R.chance(.1) ? R.range(.6, 1.3) : R.range(0, .42));
+    if (ringed) p.ring = makeRing(R, R.range(0, 360));
+    const e = R.range(0, .1), inc = R.range(-.07, .07), node = R.range(0, TAU), peri = R.range(0, TAU);
+    const rotY = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0]*c + v[2]*s2, v[1], -v[0]*s2 + v[2]*c]; };
+    const rotX = (v, ang) => { const c = Math.cos(ang), s2 = Math.sin(ang); return [v[0], v[1]*c - v[2]*s2, v[1]*s2 + v[2]*c]; };
+    p.orbit = { a, e, b: a * Math.sqrt(1 - e*e), period: T0 * Math.pow(a / a0, 1.5), M0: R.range(0, TAU),
+      P: rotY(rotX(rotY([1, 0, 0], peri), inc), node), Q: rotY(rotX(rotY([0, 0, 1], peri), inc), node) };
+    const pts = new Float32Array(161 * 3);
+    for (let k = 0; k <= 160; k++) { const E = k / 160 * TAU, x = a * (Math.cos(E) - e), z = p.orbit.b * Math.sin(E);
+      pts[k*3] = p.orbit.P[0]*x + p.orbit.Q[0]*z; pts[k*3+1] = p.orbit.P[1]*x + p.orbit.Q[1]*z; pts[k*3+2] = p.orbit.P[2]*x + p.orbit.Q[2]*z; }
+    p.orbit.pts = pts;
+    // moons
+    const mc = type === 'gas' ? R.int(1, 4) : R.weighted([[0, 4.5], [1, 4], [2, 1.5]]);
+    let ma = (p.ring ? p.ring.outer + .5 : 2.3) + R.range(0, .6);
+    for (let j = 0; j < mc; j++) {
+      const mt = R.weighted([['barren', 6], ['ice', 2.5], ['lava', .8], ['desert', 1]]);
+      const mr = type === 'gas' ? R.range(.4, 1.1) : rad * R.range(.18, .32);
+      const m = makeWorld(R, mt, mr, true);
+      m.name = p.name + String.fromCharCode(65 + j); m.parent = p;
+      makeFrame(m, R, R.range(0, .3));
+      m.orbit = { a: ma * rad, period: R.range(9, 14) * Math.pow(ma / 2.3, 1.5), M0: R.range(0, TAU) };
+      ma = ma * R.range(1.3, 1.55) + .2;
+      p.moons.push(m); s.bodies.push(m);
+    }
+    s.planets.push(p); s.bodies.push(p);
+    a = a * R.range(1.3, 1.56) + 3;
+  }
+  s.aMax = s.planets[n - 1].orbit.a;
+  s.rMin = Math.min(...s.planets.map(p => p.R));
+
+  // asteroid belt between two worlds
+  if (n >= 4 && R.chance(.4)) {
+    const i = R.int(1, n - 2), a1 = s.planets[i].orbit.a, a2 = s.planets[i + 1].orbit.a, mid = (a1 + a2) / 2, w = (a2 - a1) * .16;
+    const cnt = 240, d = new Float32Array(cnt * 4);
+    for (let k = 0; k < cnt; k++) { const ba = mid + (R.f() + R.f() - 1) * w; d[k*4] = ba; d[k*4+1] = R.range(0, TAU); d[k*4+2] = TAU / (T0 * Math.pow(ba / a0, 1.5)); d[k*4+3] = R.range(-1, 1) * w * .18; }
+    s.belt = { d, cnt, thr: Uint8Array.from({ length: cnt }, () => R.int(40, 230)), col: hsv(R.range(20, 50), .15, .75) };
+  }
+
+  // sky: haze, stars, figures
+  const gn = norm([R.range(-1, 1), R.range(.2, 1), R.range(-1, 1)]);
+  s.sky = { gn, ox: R.range(-40, 40), oy: R.range(-40, 40), oz: R.range(-40, 40), amount: R.chance(.3) ? 0 : R.range(.3, .62) };
+  const NS = 3400, st = { n: NS, dir: new Float32Array(NS * 3), col: new Float32Array(NS * 3), thr: new Uint8Array(NS), big: new Uint8Array(NS), tw: new Float32Array(NS * 2) };
+  for (let i = 0; i < NS; i++) {
+    let d; do { d = norm([R.range(-1, 1), R.range(-1, 1), R.range(-1, 1)]); const g = d[0]*gn[0] + d[1]*gn[1] + d[2]*gn[2]; if (R.f() < .3 + .7 * Math.exp(-g*g*7)) break; } while (true);
+    st.dir.set(d, i*3);
+    const m = Math.pow(R.f(), 3.2), g = .2 + .8 * m, tint = R.f();
+    const c = tint < .62 ? [1, .98, .9] : tint < .8 ? hsv(210, .4, 1) : tint < .93 ? hsv(340, .38, 1) : hsv(40, .5, 1);
+    st.col[i*3] = c[0]*g*g; st.col[i*3+1] = c[1]*g*g; st.col[i*3+2] = c[2]*g*g;
+    st.thr[i] = R.int(50, 215); st.big[i] = m > .8 ? 1 : 0;
+    st.tw[i*2] = R.chance(.3) ? R.range(.6, 2.2) : 0; st.tw[i*2+1] = R.range(0, TAU);
+  }
+  s.stars = st;
+  s.figures = [];
+  for (let k = 0; k < 30; k++) {
+    const c = norm([R.range(-1, 1), R.range(-1, 1), R.range(-1, 1)]);
+    const u = norm(cross(c, Math.abs(c[1]) < .9 ? [0, 1, 0] : [1, 0, 0])), v = cross(c, u);
+    const cnt = R.int(4, 7), pts = [], spread = R.range(.09, .15); let guard = 0;
+    while (pts.length < cnt && guard++ < 80) {
+      const x = R.range(-1, 1) * spread, y = R.range(-1, 1) * spread * .8;
+      if (pts.every(q => Math.hypot(q.x - x, q.y - y) > spread * .32)) pts.push({ x, y, d: norm([c[0] + u[0]*x + v[0]*y, c[1] + u[1]*x + v[1]*y, c[2] + u[2]*x + v[2]*y]), g: R.range(.72, 1), thr: R.int(30, 120) });
+    }
+    const edges = [], inTree = [0];
+    while (inTree.length < pts.length) { let bi = -1, bj = -1, bd = 9;
+      for (const i of inTree) for (let j = 0; j < pts.length; j++) if (!inTree.includes(j)) { const dd = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y); if (dd < bd) { bd = dd; bi = i; bj = j; } }
+      edges.push([bi, bj]); inTree.push(bj); }
+    if (pts.length > 4 && R.chance(.3)) edges.push([inTree[inTree.length - 1], inTree[0]]);
+    s.figures.push({ pts, edges });
+  }
+  return s;
+}
+
+/* ───────────── camera ───────────── */
+const cam = { yaw: 0.6, pitch: 0.5, pitchBase: 0.5, dist: 400, distBase: 400, t: [0, 0, 0], o: 1, focus: null, tr: null, userPitch: 0, zoom: 1,
+  right: [1, 0, 0], down: [0, 1, 0], back: [0, 0, 1], pos: [0, 0, 0] };
+let time = 0, overviewDist = 400, bodyScale = 3, fade = 0, fadeDir = 1, pendingSeed = null, labelT = 0;
+const YAW_RATE = 0.021;
+
+function fitSystem() {
+  const a = sys.aMax * 1.08;
+  overviewDist = Math.max(a * F / (0.47 * W), a * 0.62 * F / (0.4 * H)) * 1.04;
+  bodyScale = clamp(3.9 / (sys.rMin * F / overviewDist), 1.4, 9);
+}
+function focusDist(b) {
+  let rpx = (b.kind === 'star' ? 0.2 : b.kind === 'moon' ? 0.19 : 0.25) * MINWH;
+  if (b.ring) rpx = Math.min(rpx, 0.45 * Math.min(W * 0.92, H * 1.5) / b.ring.outer);
+  return b.R * F / rpx;
+}
+function setFocus(b, dur) {
+  if (b === cam.focus && !cam.tr) return;
+  const goal = b ? b.pos : [0, 0, 0];
+  const span = Math.hypot(goal[0] - cam.t[0], goal[1] - cam.t[1], goal[2] - cam.t[2]);
+  dur = dur || (b && cam.focus ? 6.5 : 5.5);
+  let yawDelta = 0;
+  if (b && b.kind !== 'star') { // arrive off to one side of the sun line so the world shows a phase
+    const sunYaw = Math.atan2(-goal[2], -goal[0]), side = (hash3(b.name.length, Math.floor(time), 7) & 1) ? 1 : -1;
+    yawDelta = wrapPi(sunYaw + side * (0.85 + (hash3(Math.floor(time), 3, 1) % 100) / 100 * 0.5) - (cam.yaw + YAW_RATE * dur));
+  }
+  cam.tr = { u: 0, dur, from: cam.t.slice(), fromDist: cam.distBase, fromO: cam.o, fromPitch: cam.pitchBase, yawDelta, lastE: 0,
+    hump: b && cam.focus ? Math.min(span * 0.75, overviewDist * 0.6) : 0 };
+  cam.focus = b; cam.zoom = 1; labelT = -dur * 0.55;
+  syncWorldButtons();
+}
+function updateCamera(dt) {
+  const b = cam.focus, goal = b ? b.pos : [0, 0, 0];
+  const goalDist = b ? focusDist(b) : overviewDist, goalO = b ? 0 : 1, goalPitch = b ? 0.2 : 0.56;
+  cam.yaw += YAW_RATE * dt * (dragging ? 0 : 1);
+  if (cam.tr) {
+    const tr = cam.tr; tr.u = Math.min(1, tr.u + dt / tr.dur);
+    const e = tr.u < .5 ? 4*tr.u*tr.u*tr.u : 1 - Math.pow(-2*tr.u + 2, 3) / 2;
+    for (let i = 0; i < 3; i++) cam.t[i] = lerp(tr.from[i], goal[i], e);
+    cam.distBase = Math.exp(lerp(Math.log(tr.fromDist), Math.log(goalDist), e)) + Math.sin(Math.PI * e) * tr.hump;
+    cam.o = lerp(tr.fromO, goalO, e); cam.pitchBase = lerp(tr.fromPitch, goalPitch, e);
+    cam.yaw += tr.yawDelta * (e - tr.lastE); tr.lastE = e;
+    if (tr.u >= 1) cam.tr = null;
+  } else { cam.t[0] = goal[0]; cam.t[1] = goal[1]; cam.t[2] = goal[2]; cam.distBase = goalDist; cam.o = goalO; cam.pitchBase = goalPitch; }
+  cam.dist = cam.distBase * cam.zoom;
+  cam.pitch = clamp(cam.pitchBase + 0.07 * Math.sin(time * 0.09) + cam.userPitch, -1.35, 1.45);
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch), cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  cam.back = [cp*cy, sp, cp*sy]; cam.right = [sy, 0, -cy]; cam.down = [sp*cy, -cp, sp*sy];
+  cam.pos = [cam.t[0] + cam.back[0]*cam.dist, cam.t[1] + cam.back[1]*cam.dist, cam.t[2] + cam.back[2]*cam.dist];
+}
+
+/* ───────────── simulation ───────────── */
+function updateBodies() {
+  const sc = 1 + (bodyScale - 1) * cam.o;
+  sys.star.Re = sys.star.R * (1 + (bodyScale - 1) * 0.22 * cam.o);
+  for (const p of sys.planets) {
+    const o = p.orbit, M = o.M0 + TAU * time / o.period; let E = M;
+    for (let i = 0; i < 4; i++) E -= (E - o.e * Math.sin(E) - M) / (1 - o.e * Math.cos(E));
+    const x = o.a * (Math.cos(E) - o.e), z = o.b * Math.sin(E);
+    p.pos[0] = o.P[0]*x + o.Q[0]*z; p.pos[1] = o.P[1]*x + o.Q[1]*z; p.pos[2] = o.P[2]*x + o.Q[2]*z;
+    p.Re = p.R * sc;
+    for (const m of p.moons) {
+      const mo = m.orbit, ang = mo.M0 + TAU * time / mo.period, c = Math.cos(ang) * mo.a * sc, s2 = Math.sin(ang) * mo.a * sc;
+      m.pos[0] = p.pos[0] + p.e1[0]*c + p.e2[0]*s2; m.pos[1] = p.pos[1] + p.e1[1]*c + p.e2[1]*s2; m.pos[2] = p.pos[2] + p.e1[2]*c + p.e2[2]*s2;
+      m.Re = m.R * sc;
+    }
+  }
+}
+function project(b) {
+  const vx = b.pos[0] - cam.pos[0], vy = b.pos[1] - cam.pos[1], vz = b.pos[2] - cam.pos[2];
+  const zc = -(vx*cam.back[0] + vy*cam.back[1] + vz*cam.back[2]);
+  b.zc = zc; b.vis = zc > b.Re * 1.6;
+  if (!b.vis) return;
+  b.sx = CX + F * (vx*cam.right[0] + vy*cam.right[1] + vz*cam.right[2]) / zc;
+  b.sy = CY + F * (vx*cam.down[0] + vy*cam.down[1] + vz*cam.down[2]) / zc;
+  b.rpx = b.Re * F / zc;
+}
+function bodyMatrix(b) { // body-from-camera rotation, and the light direction in both frames
+  const ang = b.spin0 + TAU * time / b.spinP, c = Math.cos(ang), s2 = Math.sin(ang), m = b.m;
+  const u = [b.e1[0]*c + b.e2[0]*s2, b.e1[1]*c + b.e2[1]*s2, b.e1[2]*c + b.e2[2]*s2];
+  const w = [-b.e1[0]*s2 + b.e2[0]*c, -b.e1[1]*s2 + b.e2[1]*c, -b.e1[2]*s2 + b.e2[2]*c];
+  const rows = [u, b.ax, w], cols = [cam.right, cam.down, cam.back];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) m[i*3 + j] = rows[i][0]*cols[j][0] + rows[i][1]*cols[j][1] + rows[i][2]*cols[j][2];
+  const L = norm([-b.pos[0], -b.pos[1], -b.pos[2]]);
+  b.lc = [L[0]*cam.right[0] + L[1]*cam.right[1] + L[2]*cam.right[2], L[0]*cam.down[0] + L[1]*cam.down[1] + L[2]*cam.down[2], L[0]*cam.back[0] + L[1]*cam.back[1] + L[2]*cam.back[2]];
+  b.lb = [L[0]*u[0] + L[1]*u[1] + L[2]*u[2], L[0]*b.ax[0] + L[1]*b.ax[1] + L[2]*b.ax[2], L[0]*w[0] + L[1]*w[1] + L[2]*w[2]];
+}
+
+/* ───────────── drawing ───────────── */
+function drawSky() {
+  const s = sys.sky, g = skyGrid, r = cam.right, d = cam.down, bk = cam.back, q = quiet();
+  if (s.amount <= 0) { buf.fill(0); return; }
+  for (let gy = 0, i = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++, i += 3) {
+    const x = gx * GRID - CX, y = gy * GRID - CY;
+    let vx = r[0]*x + d[0]*y - bk[0]*F, vy = r[1]*x + d[1]*y - bk[1]*F, vz = r[2]*x + d[2]*y - bk[2]*F;
+    const l = 1 / Math.hypot(vx, vy, vz); vx *= l; vy *= l; vz *= l;
+    const n = fbm(vx*1.5 + s.ox, vy*1.5 + s.oy, vz*1.5 + s.oz, 4), gb = vx*s.gn[0] + vy*s.gn[1] + vz*s.gn[2];
+    const dn = smooth(0.1, 0.42, n + Math.exp(-gb*gb*7) * 0.17 - 0.04) * s.amount;
+    g[i] = q[0] * dn; g[i+1] = q[1] * dn; g[i+2] = q[2] * dn;
+  }
+  for (let y = 0, p = 0; y < H; y++) {
+    const gy = y / GRID | 0, fy = (y - gy * GRID) / GRID, r0 = gy * GW * 3, r1 = r0 + GW * 3;
+    for (let x = 0; x < W; x++, p += 3) {
+      const gx = x / GRID | 0, fx = (x - gx * GRID) / GRID, a = r0 + gx*3, b = r1 + gx*3;
+      for (let c = 0; c < 3; c++) { const t0 = g[a+c] + (g[a+3+c] - g[a+c]) * fx, t1 = g[b+c] + (g[b+3+c] - g[b+c]) * fx; buf[p+c] = t0 + (t1 - t0) * fy; }
+    }
+  }
+}
+function plot(x, y, r, g, b, thr) {
+  if (x < 0 || y < 0 || x >= W || y >= H) return;
+  const p = y * W + x, i = p * 3;
+  if (r > buf[i]) buf[i] = r; if (g > buf[i+1]) buf[i+1] = g; if (b > buf[i+2]) buf[i+2] = b;
+  if (thr) thrOv[p] = thr;
+}
+function drawStars() {
+  const st = sys.stars, r = cam.right, d = cam.down, bk = cam.back;
+  for (let i = 0; i < st.n; i++) {
+    const dx = st.dir[i*3], dy = st.dir[i*3+1], dz = st.dir[i*3+2], zc = -(dx*bk[0] + dy*bk[1] + dz*bk[2]);
+    if (zc < 0.3) continue;
+    const x = Math.floor(CX + F * (dx*r[0] + dy*r[1] + dz*r[2]) / zc), y = Math.floor(CY + F * (dx*d[0] + dy*d[1] + dz*d[2]) / zc);
+    if (x < -1 || y < -1 || x > W || y > H) continue;
+    const tw = st.tw[i*2] && !reducedMotion ? 0.72 + 0.28 * Math.sin(time * st.tw[i*2] + st.tw[i*2+1]) : 1;
+    const cr = st.col[i*3] * tw, cg = st.col[i*3+1] * tw, cb = st.col[i*3+2] * tw, th = st.thr[i];
+    plot(x, y, cr, cg, cb, th);
+    if (st.big[i] && tw > 0.8) { plot(x-1, y, cr*.3, cg*.3, cb*.3, th); plot(x+1, y, cr*.3, cg*.3, cb*.3, th); plot(x, y-1, cr*.3, cg*.3, cb*.3, th); plot(x, y+1, cr*.3, cg*.3, cb*.3, th); }
+  }
+}
+function line(x0, y0, z0, x1, y1, z1, r, g, b, dash, skip) {
+  if ((x0 < 0 && x1 < 0) || (y0 < 0 && y1 < 0) || (x0 >= W && x1 >= W) || (y0 >= H && y1 >= H)) return;
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), n = Math.max(dx, dy);
+  if (n > 3000) return;
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let err = dx - dy, x = x0, y = y0;
+  for (let k = 0; k <= n; k++) {
+    if (x >= 0 && y >= 0 && x < W && y < H && k >= skip && k <= n - skip && (!dash || (k % dash) < dash / 2)) {
+      const p = y * W + x;
+      if (z0 + (z1 - z0) * (n ? k / n : 0) < depth[p]) { const i = p * 3; if (r > buf[i]) buf[i] = r; if (g > buf[i+1]) buf[i+1] = g; if (b > buf[i+2]) buf[i+2] = b; }
+    }
+    const e2 = 2 * err; if (e2 > -dy) { err -= dy; x += sx; } if (e2 < dx) { err += dx; y += sy; }
+  }
+}
+const QUIET_1BIT = [0.07, 0.07, 0.07];
+const quiet = () => PALETTES[S.pal].c.length >= 3 ? PALETTES[S.pal].night : QUIET_1BIT;
+function drawFigures() {
+  const ql = quiet();
+  const r = cam.right, d = cam.down, bk = cam.back;
+  for (const f of sys.figures) {
+    let ok = true, on = false;
+    for (const q of f.pts) {
+      const zc = -(q.d[0]*bk[0] + q.d[1]*bk[1] + q.d[2]*bk[2]);
+      if (zc < 0.5) { ok = false; break; }
+      q.sx = CX + F * (q.d[0]*r[0] + q.d[1]*r[1] + q.d[2]*r[2]) / zc; q.sy = CY + F * (q.d[0]*d[0] + q.d[1]*d[1] + q.d[2]*d[2]) / zc;
+      if (q.sx > -20 && q.sy > -20 && q.sx < W + 20 && q.sy < H + 20) on = true;
+    }
+    if (!ok || !on) continue;
+    if (S.lines) for (const e of f.edges) { const a = f.pts[e[0]], b = f.pts[e[1]]; line(a.sx, a.sy, 0, b.sx, b.sy, 0, ql[0], ql[1], ql[2], 4, 3); }
+    for (const q of f.pts) { const x = Math.floor(q.sx), y = Math.floor(q.sy), v = q.g * q.g;
+      plot(x, y, v, v, v * .94, q.thr); plot(x-1, y, v*.34, v*.34, v*.34, q.thr); plot(x+1, y, v*.34, v*.34, v*.34, q.thr); plot(x, y-1, v*.34, v*.34, v*.34, q.thr); plot(x, y+1, v*.34, v*.34, v*.34, q.thr); }
+  }
+}
+
+function drawStar(b) {
+  const sx = b.sx, sy = b.sy, r = Math.max(b.rpx, 1), m = b.m, glowR = Math.max(r * 4.4, r + 10), tt = time * 0.035;
+  const x0 = Math.max(0, Math.floor(sx - glowR)), x1 = Math.min(W - 1, Math.ceil(sx + glowR)), y0 = Math.max(0, Math.floor(sy - glowR)), y1 = Math.min(H - 1, Math.ceil(sy + glowR));
+  const c = b.col, r2 = r * r, g2 = glowR * glowR, oct = r < 8 ? 2 : 3;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const px = x + .5 - sx, py = y + .5 - sy, d2 = px*px + py*py, p = y * W + x, i = p * 3;
+    if (d2 < r2) {
+      const dx = px / r, dy = py / r, dz = Math.sqrt(1 - dx*dx - dy*dy);
+      const bx = m[0]*dx + m[1]*dy + m[2]*dz, by = m[3]*dx + m[4]*dy + m[5]*dz, bz = m[6]*dx + m[7]*dy + m[8]*dz;
+      const k = 0.38 + 0.52 * dz + fbm(bx*3 + b.nx + tt, by*3, bz*3 - tt, oct) * 0.9;
+      const col = k > 0.74 ? b.hot : k > 0.4 ? b.midc : b.edge;
+      buf[i] = col[0]; buf[i+1] = col[1]; buf[i+2] = col[2]; thrOv[p] = 0; depth[p] = b.zc - dz * b.Re;
+    } else if (d2 < g2) {
+      const u = (Math.sqrt(d2) - r) / (glowR - r), g = (1 - u) * (1 - u) * 0.8 / (1 + 9 * u);
+      buf[i] += c[0] * g; buf[i+1] += c[1] * g; buf[i+2] += c[2] * g;
+    }
+  }
+  if (r < 3.2) { // distant sun: a small four-point flare
+    const X = Math.floor(sx), Y = Math.floor(sy);
+    for (let k = 1; k <= 5; k++) { const v = 0.9 / (k * k * 0.6 + 0.4); plot(X + k, Y, c[0]*v, c[1]*v, c[2]*v, 0); plot(X - k, Y, c[0]*v, c[1]*v, c[2]*v, 0); plot(X, Y + k, c[0]*v, c[1]*v, c[2]*v, 0); plot(X, Y - k, c[0]*v, c[1]*v, c[2]*v, 0); }
+  }
+}
+
+function drawBody(b) {
+  const sx = b.sx, sy = b.sy, r = b.rpx, L = b.lc, Lx = L[0], Ly = L[1], Lz = L[2], lt = sys.light, nt = PALETTES[S.pal].night;
+  if (r < 1.15) { // a speck: one pixel carrying the world's phase
+    const x = Math.floor(sx), y = Math.floor(sy);
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    const p = y * W + x, i = p * 3, k = clamp((1 + Lz) / 2 + 0.25, 0, 1);
+    if (b.zc < depth[p]) { buf[i] = nt[0] + (b.avg[0]*lt[0] - nt[0])*k; buf[i+1] = nt[1] + (b.avg[1]*lt[1] - nt[1])*k; buf[i+2] = nt[2] + (b.avg[2]*lt[2] - nt[2])*k; thrOv[p] = 0; depth[p] = b.zc; }
+    return;
+  }
+  const m = b.m, flat = r < 3.4, oct = r < 7 ? 2 : r < 16 ? 3 : r < 42 ? 4 : 5;
+  const at = b.atmo, halo = at && r * at.w >= 0.9 ? at.w : 0, wrap = at ? at.dens * 0.28 : 0;
+  const acr = at ? at.col[0] * lt[0] : 0, acg = at ? at.col[1] * lt[1] : 0, acb = at ? at.col[2] * lt[2] : 0;
+  // ring plane in camera space
+  let ring = b.ring && r > 2.2 ? b.ring : null, rnx = 0, rny = 0, rnz = 1, Ln = 0, in2 = 0, out2 = 0, rspan = 1, ringLit = 1, rc = 0, rs = 0;
+  if (ring) {
+    rnx = b.ax[0]*cam.right[0] + b.ax[1]*cam.right[1] + b.ax[2]*cam.right[2]; rny = b.ax[0]*cam.down[0] + b.ax[1]*cam.down[1] + b.ax[2]*cam.down[2]; rnz = b.ax[0]*cam.back[0] + b.ax[1]*cam.back[1] + b.ax[2]*cam.back[2];
+    if (Math.abs(rnz) < 0.035) ring = null;
+    else { Ln = Lx*rnx + Ly*rny + Lz*rnz; in2 = ring.inner * ring.inner; out2 = ring.outer * ring.outer; rspan = 47.99 / (ring.outer - ring.inner);
+      ringLit = (Ln * rnz > 0 ? 1 : 0.5) * (0.6 + 0.4 * Math.min(1, Math.abs(Ln) * 3)); const ra = time * ring.spin; rc = Math.cos(ra); rs = Math.sin(ra); }
+  }
+  const ext = Math.max(1 + halo, ring ? ring.outer : 0), halo2 = (1 + halo) * (1 + halo);
+  const x0 = Math.max(0, Math.floor(sx - r * ext)), x1 = Math.min(W - 1, Math.ceil(sx + r * ext)), y0 = Math.max(0, Math.floor(sy - r * ext)), y1 = Math.min(H - 1, Math.ceil(sy + r * ext));
+  const cl = !flat && b.cloud ? b.cloud : null, lb = b.lb;
+  let cc = 1, cs = 0, ct = 0; if (cl) { const a = time * cl.rate * 2; cc = Math.cos(a); cs = Math.sin(a); ct = time * 0.006; }
+  const shadowOn = cl && r > 20;
+  const hl = Math.hypot(Lx, Ly, Lz + 1) || 1, hx = Lx / hl, hy = Ly / hl, hz = (Lz + 1) / hl;
+  const back = Lz < 0 ? -Lz : 0;
+
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const dx = (x + .5 - sx) / r, dy = (y + .5 - sy) / r, d2 = dx*dx + dy*dy;
+    if (d2 >= halo2 && (!ring || d2 >= out2)) continue;
+    const p = y * W + x, i = p * 3;
+    let dz = 0;
+    if (d2 < 1) {
+      dz = Math.sqrt(1 - d2);
+      const zs = b.zc - dz * b.Re;
+      if (zs < depth[p]) {
+        const ndl = dx*Lx + dy*Ly + dz*Lz;
+        let R0, G0, B0, E0 = 0, E1 = 0, E2 = 0, sp = 0, tag = 0, sh = 1;
+        if (flat) { R0 = b.avg[0]; G0 = b.avg[1]; B0 = b.avg[2]; }
+        else {
+          const bx = m[0]*dx + m[1]*dy + m[2]*dz, by = m[3]*dx + m[4]*dy + m[5]*dz, bz = m[6]*dx + m[7]*dy + m[8]*dz;
+          b.surf(bx, by, bz, oct);
+          R0 = sR; G0 = sG; B0 = sB; E0 = sE0; E1 = sE1; E2 = sE2; sp = sSpec; tag = sTag;
+          if (cl) {
+            const qx = bx*cc - bz*cs, qz = bx*cs + bz*cc, f = cl.f;
+            const w = noise3(qx*1.3 + cl.ox, by*1.3 + ct, qz*1.3 + cl.oz) * 0.55;
+            const c = fbm(qx*f + w + cl.ox, by*f*1.7 + w, qz*f + cl.oz + ct, oct > 4 ? 4 : oct);
+            if (c > cl.thr) { const k = c > cl.thr + 0.1 ? cl.col : cl.col2; R0 = k[0]; G0 = k[1]; B0 = k[2]; sp = 0; tag = 0; E0 *= .15; E1 *= .15; E2 *= .15; }
+            else if (shadowOn && ndl > 0) {
+              const ex = bx + lb[0]*0.045, ey = by + lb[1]*0.045, ez = bz + lb[2]*0.045, q2x = ex*cc - ez*cs, q2z = ex*cs + ez*cc;
+              const w2 = noise3(q2x*1.3 + cl.ox, ey*1.3 + ct, q2z*1.3 + cl.oz) * 0.55;
+              if (fbm(q2x*f + w2 + cl.ox, ey*f*1.7 + w2, q2z*f + cl.oz + ct, 3) > cl.thr + 0.02) sh = 0.6;
+            }
+          }
+          if (b.lights && tag && ndl < -0.08 && (hash3(bx*46 | 0, by*46 | 0, bz*46 | 0) & 7) < 2) { E0 = 1; E1 = .72; E2 = .3; }
+        }
+        let k = smooth(-0.05 - wrap * 0.5, 0.13 + wrap * 0.7, ndl); // terminator: a narrow dithered band
+        if (ring && Ln !== 0) { // ring shadow falling on the globe
+          const t = -(dx*rnx + dy*rny + dz*rnz) / Ln;
+          if (t > 0) { const qx = dx + t*Lx, qy = dy + t*Ly, qz = dz + t*Lz, q2 = qx*qx + qy*qy + qz*qz;
+            if (q2 > in2 && q2 < out2) k *= 1 - 0.9 * ring.tab[(Math.sqrt(q2) - ring.inner) * rspan | 0]; }
+        }
+        const li = (0.76 + 0.24 * smooth(0.5, 0.6, ndl)) * sh, glow = 1 - k * 0.8;
+        let cr = nt[0] + (R0 * lt[0] * li - nt[0]) * k + E0 * glow, cg = nt[1] + (G0 * lt[1] * li - nt[1]) * k + E1 * glow, cb = nt[2] + (B0 * lt[2] * li - nt[2]) * k + E2 * glow;
+        if (sp && sh > 0.9 && k > 0.9) { const nh = dx*hx + dy*hy + dz*hz; if (nh > 0.988) { cr += lt[0]*.75; cg += lt[1]*.75; cb += lt[2]*.75; } else if (nh > 0.968) { cr += lt[0]*.2; cg += lt[1]*.2; cb += lt[2]*.2; } }
+        if (at) { let rim = 1 - dz; rim *= rim; const ha = at.dens * (0.1 + 0.9 * rim) * clamp(ndl * 1.5 + 0.42, 0, 1);
+          cr += (acr - cr) * ha; cg += (acg - cg) * ha; cb += (acb - cb) * ha; }
+        buf[i] = cr; buf[i+1] = cg; buf[i+2] = cb; thrOv[p] = 0; depth[p] = zs;
+      } else continue;
+    } else if (d2 < halo2) { // haze beyond the limb, brightest toward the sun and when backlit
+      const rr = Math.sqrt(d2), u = (rr - 1) / halo, nl = (dx*Lx + dy*Ly) / rr;
+      let a = (1 - u); a = a * (0.35 + 0.65 * a) * at.dens * smooth(-0.6, 0.4, nl) * (0.9 + 0.7 * back); if (a > 0.95) a = 0.95;
+      const k = 1 + back * 0.4;
+      buf[i] += (acr * k - buf[i]) * a; buf[i+1] += (acg * k - buf[i+1]) * a; buf[i+2] += (acb * k - buf[i+2]) * a;
+    }
+    if (ring) {
+      const zr = -(dx*rnx + dy*rny) / rnz, q2 = d2 + zr*zr;
+      if (q2 > in2 && q2 < out2 && (d2 >= 1 || zr > 0)) {
+        const q = Math.sqrt(q2); let a = ring.tab[(q - ring.inner) * rspan | 0], col = ring.col;
+        if (a > 0) {
+          if (ring.debris && r > 9) { // chunky rubble: clumps in the ring plane, turning slowly
+            const ux = dx, uy = dy, uz = zr; // point on the plane (camera space)
+            const e1x = m[0]*ux + m[1]*uy + m[2]*uz, e1z = m[6]*ux + m[7]*uy + m[8]*uz; // planet frame, in-plane coords
+            const wx = e1x*rc - e1z*rs, wz = e1x*rs + e1z*rc, n = noise3(wx*5.5 + ring.ox, q*7, wz*5.5);
+            if (n < 0.08) a = 0; else { a = Math.min(1, a * 1.5); if (n > 0.3) col = ring.col2; }
+          }
+          if (a > 0) {
+            let lit = ringLit; const pl = dx*Lx + dy*Ly + zr*Lz; if (pl < 0 && q2 - pl*pl < 1) lit *= 0.07;
+            buf[i] += (col[0]*lt[0]*lit - buf[i]) * a; buf[i+1] += (col[1]*lt[1]*lit - buf[i+1]) * a; buf[i+2] += (col[2]*lt[2]*lit - buf[i+2]) * a;
+            if (a > 0.6) thrOv[p] = 0;
+          }
+        }
+      }
+    }
+  }
+}
+
+const orbBuf = new Float32Array(161 * 3);
+function drawPath(pts, n, r, g, b) { // pts: world xyz triples
+  const cr = cam.right, cd = cam.down, bk = cam.back, cp = cam.pos; let px = 0, py = 0, pz = -1;
+  for (let k = 0; k < n; k++) {
+    const vx = pts[k*3] - cp[0], vy = pts[k*3+1] - cp[1], vz = pts[k*3+2] - cp[2], zc = -(vx*bk[0] + vy*bk[1] + vz*bk[2]);
+    let x = 0, y = 0;
+    if (zc > 1) { x = CX + F * (vx*cr[0] + vy*cr[1] + vz*cr[2]) / zc; y = CY + F * (vx*cd[0] + vy*cd[1] + vz*cd[2]) / zc;
+      if (pz > 1) line(px, py, pz, x, y, zc, r, g, b, 0, 0); }
+    px = x; py = y; pz = zc;
+  }
+}
+function drawOrbits() {
+  const q = quiet();
+  for (const p of sys.planets) {
+    if (cam.o > 0.3 || cam.focus === p || (cam.focus && cam.focus.parent === p)) drawPath(p.orbit.pts, 161, q[0], q[1], q[2]);
+    if (cam.o < 0.5 && p.moons.length && p.vis && p.rpx > 6) {
+      const sc = 1 + (bodyScale - 1) * cam.o;
+      for (const mo of p.moons) { const a = mo.orbit.a * sc;
+        for (let k = 0; k <= 64; k++) { const ang = k / 64 * TAU, c = Math.cos(ang) * a, s2 = Math.sin(ang) * a;
+          orbBuf[k*3] = p.pos[0] + p.e1[0]*c + p.e2[0]*s2; orbBuf[k*3+1] = p.pos[1] + p.e1[1]*c + p.e2[1]*s2; orbBuf[k*3+2] = p.pos[2] + p.e1[2]*c + p.e2[2]*s2; }
+        drawPath(orbBuf, 65, q[0], q[1], q[2]); }
+    }
+  }
+}
+function drawBelt() {
+  const bl = sys.belt; if (!bl) return;
+  const cr = cam.right, cd = cam.down, bk = cam.back, cp = cam.pos, d = bl.d, c = bl.col, lt = sys.light;
+  for (let k = 0; k < bl.cnt; k++) {
+    const ang = d[k*4+1] + d[k*4+2] * time, vx = Math.cos(ang) * d[k*4] - cp[0], vy = d[k*4+3] - cp[1], vz = Math.sin(ang) * d[k*4] - cp[2];
+    const zc = -(vx*bk[0] + vy*bk[1] + vz*bk[2]); if (zc < 2) continue;
+    const x = Math.floor(CX + F * (vx*cr[0] + vy*cr[1] + vz*cr[2]) / zc), y = Math.floor(CY + F * (vx*cd[0] + vy*cd[1] + vz*cd[2]) / zc);
+    if (x < 0 || y < 0 || x >= W || y >= H || zc > depth[y * W + x]) continue;
+    const v = 0.1 + (bl.thr[k] / 255) * 0.22;
+    plot(x, y, c[0]*lt[0]*v, c[1]*lt[1]*v, c[2]*lt[2]*v, bl.thr[k]);
+  }
+}
+
+/* ───────────── captions (3×5 pixel type) ───────────── */
+const WHITE = [1, 1, 1];
+const GLYPHS = {
+  A:'010101111101101',B:'110101110101110',C:'011100100100011',D:'110101101101110',E:'111100110100111',F:'111100110100100',G:'011100101101011',H:'101101111101101',
+  I:'111010010010111',J:'001001001101010',K:'101101110101101',L:'100100100100111',M:'1000111011101011000110001',N:'10011101101110011001',O:'010101101101010',P:'110101110100100',
+  Q:'010101101110011',R:'110101110101101',S:'011100010001110',T:'111010010010010',U:'101101101101111',V:'101101101101010',W:'1000110001101011101110001',X:'101101010101101',
+  Y:'101101010010010',Z:'111001010100111','0':'111101101101111','1':'010110010010111','2':'110001010100111','3':'110001010001110','4':'101101111001001',
+  '5':'111100110001110','6':'011100111101111','7':'111001010010010','8':'111101111101111','9':'111101111001110','-':'000000111000000','.':'000000000000010',
+  '*':'000000010000000',' ':'000000000000000',
+};
+function drawText(str, x, y, k, sc, col) {
+  str = str.toUpperCase();
+  for (const ch of str) {
+    const g = GLYPHS[ch] || GLYPHS[' '], gw = g.length / 5;
+    for (let j = 0; j < g.length; j++) if (g[j] === '1') for (let a = 0; a < sc; a++) for (let b2 = 0; b2 < sc; b2++) {
+      const px = x + (j % gw) * sc + a, py = y + (j / gw | 0) * sc + b2; if (px < 0 || py < 0 || px >= W || py >= H) continue;
+      const p = py * W + px, i = p * 3; buf[i] = col[0] * k; buf[i+1] = col[1] * k; buf[i+2] = col[2] * k; thrOv[p] = k > 0.9 ? 128 : 0;
+    }
+    x += (gw + 1) * sc;
+  }
+}
+function drawLabel() {
+  const k = clamp(labelT / 1.4, 0, 1); if (k <= 0) return;
+  const b = cam.focus, sc = MINWH >= 320 ? 2 : 1, x = 6 * sc, y = 6 * sc;
+  let l1, l2;
+  if (!b) { l1 = sys.name; l2 = sys.planets.length + ' worlds * ' + sys.star.label; }
+  else if (b.kind === 'star') { l1 = sys.name; l2 = b.label; }
+  else { l1 = b.name; l2 = (b.ring ? 'Ringed ' : '') + (b.kind === 'moon' ? b.label.replace('world', 'moon') : b.label) + (b.moons.length ? ' * ' + b.moons.length + (b.moons.length > 1 ? ' moons' : ' moon') : '') + (b.lights ? ' * lit at night' : ''); }
+  drawText(l1, x, y, k, sc, WHITE); drawText(l2, x, y + 8 * sc, k, sc, PALETTES[S.pal].midc);
+}
+
+/* ───────────── frame ───────────── */
+const order = [];
+function render() {
+  drawSky(); thrOv.fill(0); depth.fill(Infinity);
+  drawStars(); drawFigures();
+  order.length = 0;
+  for (const b of sys.bodies) { project(b); if (b.kind === 'moon' && cam.o > 0.55) { b.vis = false; continue; } if (b.vis && b.sx > -W && b.sx < 2*W && b.sy > -H && b.sy < 2*H || (b.vis && b.kind === 'star')) order.push(b); }
+  order.sort((a, b) => b.zc - a.zc);
+  for (const b of order) { bodyMatrix(b); if (b.kind === 'star') drawStar(b); else drawBody(b); }
+  if (S.orbits) drawOrbits();
+  drawBelt();
+  if (S.labels) drawLabel();
+  // palette + dither
+  const pal = PALETTES[S.pal].u32, fd = fade * fade, n = W * H;
+  for (let p = 0, i = 0; p < n; p++, i += 3) {
+    let r = buf[i] * fd, g = buf[i+1] * fd, b = buf[i+2] * fd;
+    if (r > 1) r = 1; if (g > 1) g = 1; if (b > 1) b = 1;
+    const cell = ((Math.sqrt(r) * LN1 + .5 | 0) * LN + (Math.sqrt(g) * LN1 + .5 | 0)) * LN + (Math.sqrt(b) * LN1 + .5 | 0);
+    out32[p] = lutT[cell] > (thrOv[p] || thrMap[p]) ? pal[lutB[cell]] : pal[lutA[cell]];
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* ───────────── journey ───────────── */
+const tour = { list: [], i: 0, timer: 0 };
+function buildTour() {
+  const R = RNG('tour:' + sys.seed + ':' + (tour.round = (tour.round || 0) + 1));
+  let ps = R.shuffle(sys.planets.slice());
+  if (S.mode === 0 && ps.length > 4) ps = ps.slice(0, 4);
+  tour.list = [null, ...ps]; if (R.chance(.4)) tour.list.splice(R.int(2, tour.list.length), 0, sys.star);
+  tour.i = 0; tour.timer = 20;
+}
+const dwell = b => !b ? 22 : b.kind === 'star' ? 15 : 24 + (b.moons.length ? 4 : 0) + (b.ring ? 4 : 0);
+function tourStep(dt) {
+  if (S.mode === 2 || dragging || fadeDir < 0) return;
+  tour.timer -= dt; if (tour.timer > 0) return;
+  tour.i++;
+  if (tour.i >= tour.list.length) { if (S.mode === 0) { warp(randomSeed()); return; } buildTour(); tour.timer = dwell(null); setFocus(null); return; }
+  const b = tour.list[tour.i]; setFocus(b); tour.timer = dwell(b) + 6;
+}
+function warp(seed) { pendingSeed = String(seed); fadeDir = -1; }
+function loadSystem(seed) {
+  sys = generate(seed); time = 0; fitSystem(); updateBodies();
+  cam.focus = null; cam.tr = null; cam.t = [0, 0, 0]; cam.o = 1; cam.pitchBase = 0.56; cam.userPitch = 0; cam.zoom = 1;
+  cam.distBase = overviewDist * 1.5; cam.yaw = RNG('yaw:' + seed).range(0, TAU);
+  cam.tr = { u: 0, dur: 7, from: [0, 0, 0], fromDist: overviewDist * 1.5, fromO: 1, fromPitch: 0.75, yawDelta: 0, lastE: 0, hump: 0 };
+  labelT = -2.5; tour.round = 0; buildTour();
+  seedInput.value = seed; syncWorldButtons();
+  try { // a plain seed rides in the link so a system can be shared
+    const ok = /^[A-Za-z0-9-]{1,40}$/.test(seed) && !/^(settings|sidebar|customize|upgrade|downloads|comment-.*)$/.test(seed);
+    history.replaceState(null, '', ok ? '#' + seed : location.pathname + location.search);
+  } catch (e) {}
+}
+
+let last = 0, dragging = false;
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (ts - last < 30) return;
+  const dt = Math.min(0.1, (ts - last) / 1000) * (reducedMotion ? 0.4 : 1); last = ts;
+  step(dt); render();
+}
+function step(dt) {
+  if (fadeDir < 0) { fade -= dt / 0.9; if (fade <= 0) { fade = 0; fadeDir = 1; loadSystem(pendingSeed); pendingSeed = null; } }
+  else if (fade < 1) fade = Math.min(1, fade + dt / 1.6);
+  time += dt; labelT += dt;
+  updateBodies(); updateCamera(dt); updateBodies(); tourStep(dt);
+}
+
+/* ───────────── controls ───────────── */
+const $ = id => document.getElementById(id);
+const seedInput = $('seed');
+function applyPalette() {
+  const pal = PALETTES[S.pal]; buildLUT(pal);
+  $('pal-name').textContent = pal.name;
+  const sw = $('swatch'); sw.textContent = ''; for (const c of pal.c) { const i = document.createElement('i'); i.style.background = c; sw.appendChild(i); }
+  const n = pal.c.length, ink = pal.c[pal.seq[0]], lit = pal.c[pal.seq[n - 1]];
+  const mid = n >= 3 ? pal.c[pal.seq[Math.ceil((n - 1) / 2)]] : lit;
+  let accent = lit, best = 0.12;
+  pal.rgb.forEach((c, i) => { const ch = (Math.max(...c) - Math.min(...c)) / 255; if (pal.c[i] !== ink && pal.c[i] !== lit && ch > best) { best = ch; accent = pal.c[i]; } });
+  const st = document.documentElement.style;
+  st.setProperty('--ink', ink); st.setProperty('--lit', lit); st.setProperty('--mid', mid); st.setProperty('--accent', accent);
+}
+function syncUI() {
+  $('dit-name').textContent = DITHERS[S.dit].name; $('dit-amt').value = S.amt;
+  $('px').textContent = PIXELS[S.px].name; $('mode').textContent = MODES[S.mode];
+  $('t-orb').setAttribute('aria-pressed', S.orbits); $('t-con').setAttribute('aria-pressed', S.lines); $('t-lab').setAttribute('aria-pressed', S.labels);
+}
+function syncWorldButtons() { const b = $('w-sys'); if (b) b.setAttribute('aria-pressed', cam.focus ? 'false' : 'true'); }
+const cyc = (v, d, n) => (v + d + n) % n;
+function setPal(d) { S.pal = cyc(S.pal, d, PALETTES.length); applyPalette(); save(); }
+function setDit(d) { S.dit = cyc(S.dit, d, DITHERS.length); buildThr(); syncUI(); save(); }
+function setPx() { S.px = cyc(S.px, 1, PIXELS.length); resize(); syncUI(); save(); }
+function setMode() { S.mode = cyc(S.mode, 1, MODES.length); buildTour(); tour.timer = 12; syncUI(); save(); }
+function toggle(k) { S[k] = !S[k]; syncUI(); save(); }
+function hold() { tour.timer = Math.max(tour.timer, 40); } // a hand on the wheel pauses the tour for a while
+function worldStep(d) {
+  const list = [null, ...sys.planets], i = Math.max(0, list.indexOf(cam.focus && cam.focus.parent ? cam.focus.parent : cam.focus));
+  setFocus(list[cyc(i, d, list.length)]); hold();
+}
+function roll() { const s = randomSeed(); seedInput.value = s; warp(s); }
+function fullscreen() { try { if (document.fullscreenElement) document.exitFullscreen(); else { const p = document.documentElement.requestFullscreen(); if (p && p.catch) p.catch(() => {}); } } catch (e) {} }
+
+$('seed-form').addEventListener('submit', e => { e.preventDefault(); const v = seedInput.value.trim() || randomSeed(); warp(v); seedInput.blur(); });
+$('btn-roll').addEventListener('click', roll);
+$('pal-prev').addEventListener('click', () => setPal(-1)); $('pal-next').addEventListener('click', () => setPal(1)); $('pal-name').addEventListener('click', () => setPal(1));
+$('dit-prev').addEventListener('click', () => setDit(-1)); $('dit-next').addEventListener('click', () => setDit(1)); $('dit-name').addEventListener('click', () => setDit(1));
+$('dit-amt').addEventListener('input', e => { S.amt = +e.target.value; buildThr(); save(); });
+$('px').addEventListener('click', setPx); $('mode').addEventListener('click', setMode);
+$('w-prev').addEventListener('click', () => worldStep(-1)); $('w-next').addEventListener('click', () => worldStep(1));
+$('w-sys').addEventListener('click', () => { setFocus(null); hold(); });
+$('t-orb').addEventListener('click', () => toggle('orbits')); $('t-con').addEventListener('click', () => toggle('lines')); $('t-lab').addEventListener('click', () => toggle('labels'));
+$('btn-full').addEventListener('click', fullscreen);
+
+// idle: the strip steps away and the cursor hides
+let idleTimer = 0;
+function wake() { document.body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add('idle'), 4200); }
+['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
+
+// pointer: drag to turn, tap to pick a world
+let pd = null;
+canvas.addEventListener('pointerdown', e => { pd = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false }; try { canvas.setPointerCapture(e.pointerId); } catch (er) {} requestWake(); });
+canvas.addEventListener('pointermove', e => {
+  if (!pd) return;
+  if (!pd.moved && Math.hypot(e.clientX - pd.x, e.clientY - pd.y) > 5) { pd.moved = true; dragging = true; document.body.classList.add('dragging'); }
+  if (pd.moved) { cam.yaw -= (e.clientX - pd.lx) * 0.006; cam.userPitch = clamp(cam.userPitch + (e.clientY - pd.ly) * 0.005, -1.2, 1.1); hold(); }
+  pd.lx = e.clientX; pd.ly = e.clientY;
+});
+function endPointer(e) {
+  if (!pd) return;
+  if (!pd.moved && e.type === 'pointerup') {
+    const rect = canvas.getBoundingClientRect(), x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale;
+    let hit = null;
+    for (const b of sys.bodies) { if (!b.vis) continue; const rr = Math.max(b.rpx, 5); if (Math.hypot(b.sx - x, b.sy - y) <= rr && (!hit || b.zc < hit.zc)) hit = b; }
+    if (hit && hit !== cam.focus) { setFocus(hit); hold(); } else if (!hit && cam.focus) { setFocus(null); hold(); }
+  }
+  pd = null; dragging = false; document.body.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = clamp(cam.zoom * Math.exp(e.deltaY * 0.0012), 0.45, 3.2); hold(); }, { passive: false });
+
+let wakeLock = null;
+function requestWake() { try { if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(l => { wakeLock = l; l.addEventListener('release', () => { wakeLock = null; }); }).catch(() => {}); } catch (e) {} }
+
+window.addEventListener('keydown', e => {
+  if (e.target === seedInput) { if (e.key === 'Escape') seedInput.blur(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase(); let used = true;
+  if (k === ' ' && e.target.tagName !== 'BUTTON') roll();
+  else if (k === 'r') roll();
+  else if (k === 'arrowright') worldStep(1); else if (k === 'arrowleft') worldStep(-1);
+  else if (k === 'arrowup') setPal(-1); else if (k === 'arrowdown' || k === 'p') setPal(1);
+  else if (k === 'd') setDit(1); else if (k === 'x') setPx(); else if (k === 'm') setMode();
+  else if (k === 'o') toggle('orbits'); else if (k === 'c') toggle('lines'); else if (k === 'l') toggle('labels');
+  else if (k === 'f') fullscreen();
+  else if (k === 'escape' || k === '0') { setFocus(null); hold(); }
+  else used = false;
+  if (used && k !== ' ') e.preventDefault(); else if (k === ' ' && e.target.tagName !== 'BUTTON') e.preventDefault();
+});
+window.addEventListener('resize', resize);
+
+/* ───────────── start ───────────── */
+function start() {
+  applyPalette(); syncUI(); resize();
+  let seed = '';
+  try { seed = decodeURIComponent((location.hash || '').slice(1)); } catch (e) {}
+  if (!/^[A-Za-z0-9-]{1,40}$/.test(seed)) seed = randomSeed();
+  loadSystem(seed);
+  wake();
+  requestAnimationFrame(frame);
+}
+// small hook for tinkering from the console
+window.quietOrbits = { visit: s => warp(s), focus: i => setFocus(i < 0 ? null : sys.planets[i] || sys.star), get system() { return sys; },
+  _step: (dt, n) => { for (let i = 0; i < (n || 1); i++) step(dt); render(); }, _load: s => { loadSystem(String(s)); fade = 1; }, _gen: s => generate(String(s)), _settle: () => { fade = 1; cam.tr = null; labelT = 5; }, _set: (k, v) => { S[k] = v; applyPalette(); buildThr(); syncUI(); } };
+start();
+})();
+</script>
