@@ -3,8 +3,11 @@
 A browser screensaver that drifts through procedurally generated solar systems,
 drawn low-res in a limited palette with ordered dithering.
 
-Open `index.html` in a browser. It is one self-contained file with no build step;
-the only external request is the UI font from Google Fonts.
+**Play it:** https://joshburer.github.io/quiet-orbits/
+
+Or open `index.html` in a browser. It is one self-contained file with no build step;
+the only external request is the UI font from Google Fonts. GitHub Pages serves it
+straight from the root of `main`.
 
 ## What it does
 
