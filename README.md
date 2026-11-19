@@ -47,6 +47,13 @@ away until you press **Menu** or H again; small previous/next buttons stay besid
 hidden. Worlds you pick by hand arrive in well under
 a second; the slow camera moves are kept for the tour.
 
+## Updates
+
+The page checks for a newer published build when it starts, whenever it comes back
+into view, and every 20 minutes, then reloads itself. That keeps a home-screen copy
+current even though phones rarely reload it. Mid-viewing it waits for the next drift
+between systems before reloading.
+
 ## Palette credits
 
 The 16 to 32 colour community palettes come from the

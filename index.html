@@ -168,6 +168,8 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
 <script>
 (() => {
 'use strict';
+// what this copy was built from, kept to tell when a newer build has been published
+const SELF = { js: document.currentScript ? document.currentScript.textContent : '', css: (document.querySelector('style') || {}).textContent || '', ui: (document.getElementById('hud') || {}).innerHTML || '' };
 
 /* ───────────── small maths ───────────── */
 const TAU = Math.PI * 2;
@@ -1304,7 +1306,7 @@ function frame(ts) {
   step(dt); render();
 }
 function step(dt) {
-  if (fadeDir < 0) { fade -= dt / 0.9; if (fade <= 0) { fade = 0; fadeDir = 1; loadSystem(pendingSeed); pendingSeed = null; } }
+  if (fadeDir < 0) { fade -= dt / 0.9; if (fade <= 0) { fade = 0; fadeDir = 1; loadSystem(pendingSeed); pendingSeed = null; if (updateReady) location.reload(); } }
   else if (fade < 1) fade = Math.min(1, fade + dt / 1.6);
   time += dt; labelT += dt;
   updateBodies(); updateCamera(dt); updateBodies(); tourStep(dt);
@@ -1428,6 +1430,31 @@ window.addEventListener('keydown', e => {
   if (used && k !== ' ') e.preventDefault(); else if (k === ' ' && e.target.tagName !== 'BUTTON') e.preventDefault();
 });
 window.addEventListener('resize', resize);
+
+/* ───────────── staying current ─────────────
+   A home-screen copy can sit suspended for days and never reload on its own, so whenever the page
+   starts or comes back into view it fetches itself fresh and reloads if the published build differs. */
+let updateReady = false, lastCheck = -1e9;
+const canSelfUpdate = (() => { try { return /^https?:$/.test(location.protocol) && window.top === window && !!SELF.js; } catch (e) { return false; } })();
+async function checkForUpdate(reloadNow) {
+  if (!canSelfUpdate || updateReady || performance.now() - lastCheck < 20000) return;
+  lastCheck = performance.now();
+  try {
+    const res = await fetch(location.pathname + location.search, { cache: 'reload' }); if (!res.ok) return;
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const js = (doc.querySelector('script:not([src])') || {}).textContent, css = (doc.querySelector('style') || {}).textContent || '', hud = doc.getElementById('hud');
+    if (!js || !hud) return; // not this page
+    if (js === SELF.js && css === SELF.css && hud.innerHTML === SELF.ui) return; // already current
+    const sig = String(xmur3(js + css + hud.innerHTML)());
+    if (sessionStorage.getItem('qo-update') === sig) return; // reloaded for this build once already; never loop
+    sessionStorage.setItem('qo-update', sig);
+    if (reloadNow) location.reload(); else updateReady = true; // mid-viewing, wait for the next drift between systems
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(true); });
+window.addEventListener('pageshow', e => { if (e.persisted) checkForUpdate(true); });
+setTimeout(() => checkForUpdate(true), 1500);
+setInterval(() => checkForUpdate(false), 20 * 60 * 1000);
 
 /* ───────────── start ───────────── */
 function start() {
