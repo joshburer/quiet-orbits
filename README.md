@@ -16,7 +16,8 @@ straight from the root of `main`.
 - **Worlds.** Each system has a star, 3–8 worlds of eight types (living, ocean,
   desert, ice, molten, barren, shrouded, gas giant), moons, the occasional
   asteroid belt, and rarely rings — banded or chunky debris.
-- **Palettes.** 15 hand-tuned palettes from 2 to 16 colours. The scene is rendered
+- **Palettes.** 34 hand-tuned palettes from 2 to 16 colours, picked from a dropdown
+  grouped by size, including three light "paper" ones. The scene is rendered
   in linear colour, then every pixel is mapped to the best pair of palette
   colours and a mix ratio.
 - **Dithering.** Bayer 2/4/8, halftone, scanline, hatch, grain or none, with an
@@ -29,12 +30,15 @@ straight from the root of `main`.
 | Input | Action |
 | --- | --- |
 | Drag / scroll | Turn the camera / zoom |
-| Click a world | Visit it (click empty sky to return) |
+| Click a world | Jump to it (click empty sky to return) |
 | Space or R | Random system |
 | Left / Right | Previous / next world |
 | Up / Down or P | Palette |
 | D, X, M | Dither pattern, pixel size, journey mode |
 | O, C, L | Orbit lines, constellation lines, name captions |
 | F, Esc | Fullscreen, back to the whole system |
+| H | Hide or show the control strip |
 
-The control strip hides after a few seconds without input.
+The control strip hides after a few seconds without input. **Hide** (or H) keeps it
+away until you press **Menu** or H again. Worlds you pick by hand arrive in well under
+a second; the slow camera moves are kept for the tour.

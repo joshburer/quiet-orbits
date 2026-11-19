@@ -38,8 +38,11 @@ body.dragging #sky{cursor:grabbing}
   background:var(--ink);border-top:2px solid var(--lit);
   transition:transform .35s steps(7,end);
 }
-body.idle .hud:not(:focus-within){transform:translateY(105%)}
-@media (prefers-reduced-motion:reduce){.hud{transition:none}}
+body.idle .hud:not(:has(:focus-visible)), body.collapsed .hud{transform:translateY(105%)}
+#hud-tab{position:fixed;z-index:6;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));transition:opacity .3s steps(4,end)}
+body:not(.collapsed) #hud-tab{display:none}
+body.idle #hud-tab:not(:focus-visible){opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.hud,#hud-tab{transition:none}}
 
 .grp{display:flex;flex-direction:column;gap:4px;min-width:0}
 .grp > .lbl{color:var(--mid);letter-spacing:.12em;text-transform:uppercase;font-size:10px}
@@ -47,13 +50,19 @@ body.idle .hud:not(:focus-within){transform:translateY(105%)}
 .brand{font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0;align-self:center;white-space:nowrap}
 .brand small{display:block;font-weight:400;font-size:10px;letter-spacing:.1em;color:var(--mid);margin-top:3px}
 
-button,input[type=text]{
+button,input[type=text],select{
   font:inherit;color:var(--lit);background:var(--ink);
   border:2px solid var(--lit);border-radius:0;
   padding:4px 7px;min-height:26px;margin:0;
   text-transform:uppercase;letter-spacing:.06em;
 }
 button{cursor:pointer;white-space:nowrap}
+select{
+  -webkit-appearance:none;appearance:none;cursor:pointer;width:13.5em;max-width:100%;padding-right:22px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--lit) 50%),linear-gradient(135deg,var(--lit) 50%,transparent 50%);
+  background-position:calc(100% - 11px) 50%,calc(100% - 6px) 50%;background-size:5px 5px;background-repeat:no-repeat;
+}
+select option,select optgroup{background:var(--ink);color:var(--lit);text-transform:none}
 button:hover{background:var(--lit);color:var(--ink)}
 button:active{background:var(--accent);border-color:var(--accent);color:var(--ink)}
 button[aria-pressed="true"]{background:var(--lit);color:var(--ink)}
@@ -96,7 +105,7 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
     <span class="lbl" id="l-pal">Palette</span>
     <div class="row" role="group" aria-labelledby="l-pal">
       <button type="button" id="pal-prev" aria-label="Previous palette">&lt;</button>
-      <button type="button" id="pal-name" class="name" title="Next palette (P)"></button>
+      <select id="pal" aria-labelledby="l-pal" title="Palette (P for next)"></select>
       <button type="button" id="pal-next" aria-label="Next palette">&gt;</button>
     </div>
     <div id="swatch" aria-hidden="true"></div>
@@ -138,9 +147,11 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
       <button type="button" id="t-con" aria-pressed="true" title="Constellation lines (C)">Figures</button>
       <button type="button" id="t-lab" aria-pressed="true" title="Name captions (L)">Names</button>
       <button type="button" id="btn-full" title="Fullscreen (F)">Full</button>
+      <button type="button" id="btn-hide" title="Hide these controls until you bring them back (H)">Hide</button>
     </div>
   </div>
 </div>
+<button type="button" id="hud-tab" title="Show the controls (H)">Menu</button>
 
 <script>
 (() => {
@@ -225,22 +236,45 @@ const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], 
 const mul3 = (a, k) => [a[0]*k, a[1]*k, a[2]*k];
 
 /* ───────────── palettes (dark → light, hand-tuned) ───────────── */
+const PALETTE_GROUPS = { wide: '8 to 16 colours', mid: '5 to 6 colours', small: '2 to 4 colours', paper: 'Paper (light ground)' };
 const PALETTES = [
-  { name: 'Dustlight', c: ['#2b2530','#4c4760','#526f8c','#8a5566','#8f9a6c','#c9a36e','#bcdbe0','#f3ecc8'] },
-  { name: 'Orrery',    c: ['#0d0d1d','#24315f','#2f7c86','#6aae69','#d8b25a','#b4513d','#d6d0c3','#fdf8ea'] },
-  { name: 'Tidepool',  c: ['#081019','#12324f','#1d6c80','#62c2b3','#e8f5dc'] },
-  { name: 'Moss',      c: ['#101c14','#2c5637','#7aa856','#dbe8ae'] },
-  { name: 'Kiln',      c: ['#190e13','#662331','#d55c38','#f6d79c'] },
-  { name: 'Nocturne',  c: ['#130c21','#3a2052','#853b70','#dd676a','#f3b178','#fbeed3'] },
-  { name: 'Regolith',  c: ['#0b0c11','#2c303f','#696e80','#b1b4c0','#f1efe9'] },
-  { name: 'Sorbet',    c: ['#1c1129','#4a2e73','#c5428d','#ff8c6b','#ffd66d','#70dfc2','#4b8ed8','#f8f4ff'] },
-  { name: 'Phosphor',  c: ['#130b00','#7a3b00','#e08a00','#ffd98a'] },
-  { name: 'Permafrost',c: ['#0a1023','#263d6c','#5b8abe','#a8d5e7','#f4fbff'] },
-  { name: 'Oxide',     c: ['#150d0d','#46221e','#8b4a30','#7b8d78','#c88a4c','#e9dab7'] },
-  { name: 'Eclipse',   c: ['#0c0509','#8a1d2c','#f1e3cf'] },
-  { name: 'One Bit',   c: ['#0c0c14','#e9e6d6'] },
-  { name: 'Almanac',   c: ['#efe6cf','#b9ad90','#8e4a3a','#29273a'], invert: true },
-  { name: 'Spectrum',  c: ['#0e0c1b','#2a2247','#4e3b78','#24415d','#2e6e73','#4ea569','#a8d05c','#f1e17a','#efa74a','#d8623b','#a7333f','#6d2648','#896a5b','#c8b19b','#9ed3df','#fbf7ea'] },
+  { name: 'Dustlight',  g: 'wide', c: ['#2b2530','#4c4760','#526f8c','#8a5566','#8f9a6c','#c9a36e','#bcdbe0','#f3ecc8'] },
+  { name: 'Orrery',     g: 'wide', c: ['#0d0d1d','#24315f','#2f7c86','#6aae69','#d8b25a','#b4513d','#d6d0c3','#fdf8ea'] },
+  { name: 'Sorbet',     g: 'wide', c: ['#1c1129','#4a2e73','#c5428d','#ff8c6b','#ffd66d','#70dfc2','#4b8ed8','#f8f4ff'] },
+  { name: 'Harvest',    g: 'wide', c: ['#1c1410','#5b2e1f','#a8482a','#e08b2c','#f2c95c','#4f6b3a','#9db36a','#f6ecd0'] },
+  { name: 'Deep Field', g: 'wide', c: ['#03040a','#141a3a','#3a2a6b','#7a3f8f','#d0608a','#f2b37a','#5aa9c9','#f8f1dc'] },
+  { name: 'Tidewrack',  g: 'wide', c: ['#10151c','#27384a','#3f6b6e','#7fa88a','#c9c48d','#a8654f','#6d4a63','#eef0df'] },
+  { name: 'Spectrum',   g: 'wide', c: ['#0e0c1b','#2a2247','#4e3b78','#24415d','#2e6e73','#4ea569','#a8d05c','#f1e17a','#efa74a','#d8623b','#a7333f','#6d2648','#896a5b','#c8b19b','#9ed3df','#fbf7ea'] },
+
+  { name: 'Nocturne',   g: 'mid', c: ['#130c21','#3a2052','#853b70','#dd676a','#f3b178','#fbeed3'] },
+  { name: 'Oxide',      g: 'mid', c: ['#150d0d','#46221e','#8b4a30','#7b8d78','#c88a4c','#e9dab7'] },
+  { name: 'Verdigris',  g: 'mid', c: ['#0f1a1a','#1f4d4a','#3f8f7a','#b5673e','#9bd3a8','#e9f2d0'] },
+  { name: 'Ultraviolet',g: 'mid', c: ['#0b0614','#2a0f4f','#5b1fa8','#b23ac7','#ff7ad9','#fff0ff'] },
+  { name: 'Dune',       g: 'mid', c: ['#1b1410','#4a2f23','#8f5a36','#6f8f9c','#cf9652','#e9cf9a'] },
+  { name: 'Rosewater',  g: 'mid', c: ['#2a1a24','#5e3348','#a5566b','#d99aa0','#f3d9d2','#fbf3ec'] },
+  { name: 'Coral Reef', g: 'mid', c: ['#06141f','#0f3d4f','#178f8f','#f26b5e','#f9b99b','#fdf3e3'] },
+  { name: 'Lichen',     g: 'mid', c: ['#14160f','#3a4326','#8a4f3a','#7b8a45','#c9c27a','#f0ecd0'] },
+  { name: 'Aurora',     g: 'mid', c: ['#05080f','#0f2a3f','#1c5d73','#f25c54','#4fb0a5','#c7f0d8'] },
+  { name: 'Tidepool',   g: 'mid', c: ['#081019','#12324f','#1d6c80','#62c2b3','#e8f5dc'] },
+  { name: 'Regolith',   g: 'mid', c: ['#0b0c11','#2c303f','#696e80','#b1b4c0','#f1efe9'] },
+  { name: 'Permafrost', g: 'mid', c: ['#0a1023','#263d6c','#5b8abe','#a8d5e7','#f4fbff'] },
+  { name: 'Sepia',      g: 'mid', c: ['#1a120b','#3c2a21','#7a5a3c','#c2a26b','#f0e3c0'] },
+  { name: 'Vesper',     g: 'mid', c: ['#1a1423','#372549','#774c60','#b75d69','#eacdc2'] },
+  { name: 'Lamplight',  g: 'mid', c: ['#0a0d14','#1b2333','#39465e','#c28f3a','#f2d38a'] },
+
+  { name: 'Moss',       g: 'small', c: ['#101c14','#2c5637','#7aa856','#dbe8ae'] },
+  { name: 'Kiln',       g: 'small', c: ['#190e13','#662331','#d55c38','#f6d79c'] },
+  { name: 'Phosphor',   g: 'small', c: ['#130b00','#7a3b00','#e08a00','#ffd98a'] },
+  { name: 'Green Screen', g: 'small', c: ['#020a04','#0b3d1a','#1f9d45','#8dfb9a'] },
+  { name: 'Blueprint',  g: 'small', c: ['#0c2340','#1d4e89','#7fb2e5','#f2f7ff'] },
+  { name: 'Semaphore',  g: 'small', c: ['#101014','#2f6fb0','#d8343f','#f2efe4'] },
+  { name: 'Bubblegum',  g: 'small', c: ['#1a1030','#ff5fa2','#5fe1ff','#fff7d6'] },
+  { name: 'Eclipse',    g: 'small', c: ['#0c0509','#8a1d2c','#f1e3cf'] },
+  { name: 'One Bit',    g: 'small', c: ['#0c0c14','#e9e6d6'] },
+
+  { name: 'Almanac',    g: 'paper', c: ['#efe6cf','#b9ad90','#8e4a3a','#29273a'], invert: true },
+  { name: 'Newsprint',  g: 'paper', c: ['#f4f1ea','#c9c4b8','#6d6a64','#161514'], invert: true },
+  { name: 'Cyanotype',  g: 'paper', c: ['#f1f5f9','#9fc0dc','#3f74a8','#0f2f57'], invert: true },
 ];
 for (const p of PALETTES) {
   p.rgb = p.c.map(h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]);
@@ -328,13 +362,13 @@ const PIXELS = [{ name: 'Chunky', h: 126 }, { name: 'Classic', h: 184 }, { name:
 const MODES = ['Wander', 'Tour', 'Still'];
 
 /* ───────────── settings ───────────── */
-const S = { pal: 0, dit: 0, amt: 100, px: 1, mode: 0, orbits: true, lines: true, labels: true };
+const S = { pal: 0, palName: 'Dustlight', dit: 0, amt: 100, px: 1, mode: 0, orbits: true, lines: true, labels: true, collapsed: false };
 try { const saved = JSON.parse(localStorage.getItem('quiet-orbits') || 'null');
   if (saved && typeof saved === 'object') for (const k in S) if (typeof saved[k] === typeof S[k]) S[k] = saved[k];
 } catch (e) {}
-S.pal = clamp(S.pal | 0, 0, PALETTES.length - 1); S.dit = clamp(S.dit | 0, 0, DITHERS.length - 1);
+S.pal = Math.max(0, PALETTES.findIndex(q => q.name === S.palName)); S.dit = clamp(S.dit | 0, 0, DITHERS.length - 1);
 S.px = clamp(S.px | 0, 0, PIXELS.length - 1); S.mode = clamp(S.mode | 0, 0, MODES.length - 1); S.amt = clamp(S.amt | 0, 0, 100);
-const save = () => { try { localStorage.setItem('quiet-orbits', JSON.stringify(S)); } catch (e) {} };
+const save = () => { S.palName = PALETTES[S.pal].name; try { localStorage.setItem('quiet-orbits', JSON.stringify(S)); } catch (e) {} };
 const reducedMotion = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
 
 /* ───────────── frame buffers ───────────── */
@@ -637,15 +671,29 @@ function generateHome(seed) {
     { n: 'Mars', t: 'desert', r: 1.3, a: 118, e: .093, i: 1.85, tilt: 25.2, o: { h: 16, capLat: .9, cloud: 0, spin: 45, atmo: { h: 22, s: .45, dens: .28, w: .08 } },
       moons: [{ n: 'Phobos', t: 'barren', r: .17, a: 2.2, p: 6, o: { h: 25, sat: .1 } }, { n: 'Deimos', t: 'barren', r: .13, a: 3.5, p: 13, o: { h: 30, sat: .1 } }] },
     { n: 'Jupiter', t: 'gas', r: 5, a: 192, e: .049, i: 1.3, tilt: 3.1, o: { h: 28, nb: 13, turb: .8, accent: -18, spin: 15, storm: { lat: -22, r: .2, red: true } },
+      lets: [4, 1.35, 1.9, 93, 5.5, 9],
       moons: [{ n: 'Io', t: 'desert', r: .5, a: 2.2, p: 7, o: { h: 52, capLat: 2, cloud: 0, atmo: null, label: 'Volcanic moon' } }, { n: 'Europa', t: 'ice', r: .43, a: 2.9, p: 14, o: { h: 200, cloud: 0, atmo: null } },
         { n: 'Ganymede', t: 'barren', r: .72, a: 3.8, p: 28, o: { h: 30, sat: .1 } }, { n: 'Callisto', t: 'barren', r: .66, a: 5, p: 65, o: { h: 25, sat: .14 } }] },
     { n: 'Saturn', t: 'gas', r: 4.3, a: 252, e: .057, i: 2.5, tilt: 26.7, ring: ringOf(1.24, 2.3, saturnRing, 40, .24), o: { h: 42, nb: 11, turb: .45, sat: .7, contrast: .6, accent: 12, spin: 17, storm: null },
-      moons: [{ n: 'Enceladus', t: 'ice', r: .3, a: 2.9, p: 9, o: { h: 205, cloud: 0, atmo: null } }, { n: 'Rhea', t: 'barren', r: .4, a: 3.6, p: 16, o: { h: 220, sat: .04 } },
-        { n: 'Titan', t: 'shroud', r: .7, a: 4.6, p: 34, o: { h: 32, atmo: { h: 30, s: .5, dens: .85, w: .26 }, label: 'Shrouded moon' } }] },
+      lets: [17, 2.35, 5.6, 261, 7, 11],
+      moons: [{ n: 'Mimas', t: 'barren', r: .2, a: 2.55, p: 6, o: { h: 220, sat: .03 } }, { n: 'Enceladus', t: 'ice', r: .24, a: 2.9, p: 8, o: { h: 205, cloud: 0, atmo: null } },
+        { n: 'Tethys', t: 'ice', r: .33, a: 3.3, p: 11, o: { h: 210, cloud: 0, atmo: null } }, { n: 'Dione', t: 'barren', r: .35, a: 3.8, p: 15, o: { h: 215, sat: .03 } },
+        { n: 'Rhea', t: 'barren', r: .42, a: 4.4, p: 22, o: { h: 220, sat: .04 } },
+        { n: 'Titan', t: 'shroud', r: .7, a: 5.3, p: 40, o: { h: 32, atmo: { h: 30, s: .5, dens: .85, w: .26 }, label: 'Shrouded moon' } },
+        { n: 'Iapetus', t: 'barren', r: .4, a: 6.5, p: 90, o: { h: 30, sat: .16 } }] },
     { n: 'Uranus', t: 'gas', r: 3.2, a: 312, e: .046, i: .8, tilt: 97.8, ring: ringOf(1.6, 2.05, uranusRing, 190, .12), o: { h: 198, nb: 8, turb: .2, sat: 1.1, contrast: .18, lift: .16, accent: 10, spin: 24, storm: null },
-      moons: [{ n: 'Titania', t: 'barren', r: .35, a: 2.9, p: 14, o: { h: 30, sat: .06 } }, { n: 'Oberon', t: 'barren', r: .34, a: 3.8, p: 21, o: { h: 15, sat: .08 } }] },
+      lets: [13, 2.08, 2.38, 10, 6, 9.5],
+      moons: [{ n: 'Miranda', t: 'barren', r: .2, a: 2.55, p: 6, o: { h: 215, sat: .04 } }, { n: 'Ariel', t: 'barren', r: .32, a: 3, p: 9, o: { h: 210, sat: .05 } },
+        { n: 'Umbriel', t: 'barren', r: .32, a: 3.6, p: 13, o: { h: 240, sat: .1 } }, { n: 'Titania', t: 'barren', r: .38, a: 4.4, p: 20, o: { h: 30, sat: .06 } },
+        { n: 'Oberon', t: 'barren', r: .36, a: 5.3, p: 28, o: { h: 15, sat: .08 } }] },
     { n: 'Neptune', t: 'gas', r: 3.1, a: 368, e: .01, i: 1.8, tilt: 28.3, o: { h: 222, nb: 9, turb: .7, sat: 1.6, contrast: .6, accent: -14, spin: 22, storm: { lat: -20, r: .17 } },
-      moons: [{ n: 'Triton', t: 'ice', r: .42, a: 3, p: -15, o: { h: 345, cloud: 0, atmo: null } }] }, // Triton runs backwards
+      lets: [6, 1.45, 2, 7, 6.5, 10],
+      moons: [{ n: 'Proteus', t: 'barren', r: .2, a: 2.3, p: 6, o: { h: 30, sat: .05 } }, { n: 'Triton', t: 'ice', r: .42, a: 3.2, p: -15, o: { h: 345, cloud: 0, atmo: null } }, // Triton runs backwards
+        { n: 'Nereid', t: 'barren', r: .14, a: 5.6, p: 80, o: { h: 220, sat: .04 } }] },
+    { n: 'Pluto', t: 'ice', r: .6, a: 440, e: .249, i: 17.2, tilt: 122.5, o: { h: 28, cloud: 0, spin: 64, atmo: { h: 212, s: .3, dens: .16, w: .06 }, label: 'Dwarf planet' },
+      moons: [{ n: 'Charon', t: 'barren', r: .3, a: 3.2, p: 12, o: { h: 20, sat: .06 } }, { n: 'Styx', t: 'barren', r: .035, a: 4.3, p: 16, o: { h: 30, sat: .04 } },
+        { n: 'Nix', t: 'barren', r: .05, a: 5, p: 20, o: { h: 30, sat: .04 } }, { n: 'Kerberos', t: 'barren', r: .035, a: 5.8, p: 26, o: { h: 30, sat: .04 } },
+        { n: 'Hydra', t: 'barren', r: .05, a: 6.6, p: 32, o: { h: 30, sat: .04 } }] },
   ];
   for (const w of worlds) {
     const p = makeWorld(R, w.t, w.r, false, w.o);
@@ -658,9 +706,16 @@ function generateHome(seed) {
       m.orbit = { a: mw.a * w.r, period: mw.p, M0: R.range(0, TAU) };
       p.moons.push(m); s.bodies.push(m);
     }
+    if (w.lets) { // the many small moons, one pixel each: [inner count, from, to, outer count, from, to] in planet radii
+      const [ni, i0, i1, no, o0, o1] = w.lets, n = ni + no, d = new Float32Array(n * 7), thr = new Uint8Array(n);
+      for (let k = 0; k < n; k++) { const inner = k < ni, a = inner ? R.range(i0, i1) : R.range(o0, o1), inc = R.range(-1, 1), retro = !inner && R.chance(.6), node = R.range(0, TAU);
+        d.set([a * w.r, R.range(0, TAU), (retro ? -1 : 1) * TAU / (9 * Math.pow(a / 2.3, 1.5)), inner ? -2 : Math.cos(inc), Math.sin(inc), Math.cos(node), Math.sin(node)], k * 7);
+        thr[k] = R.int(40, 230); }
+      p.lets = { n, d, thr };
+    }
     s.planets.push(p); s.bodies.push(p);
   }
-  s.aMax = 368; s.rMin = 1;
+  s.aMax = 452; s.rMin = 1; s.caption = '8 planets * 1 dwarf';
   s.belt = makeBelt(R, 153, 8, T0, a0);
 
   // the real sky, turned from equatorial to ecliptic coordinates so it sits right against the orbits
@@ -786,18 +841,21 @@ function focusDist(b) {
   if (b.ring) rpx = Math.min(rpx, 0.45 * Math.min(W * 0.92, H * 1.5) / b.ring.outer);
   return b.R * F / rpx;
 }
+const QUICK = 0.65;
 function setFocus(b, dur) {
   if (b === cam.focus && !cam.tr) return;
   const goal = b ? b.pos : [0, 0, 0];
   const span = Math.hypot(goal[0] - cam.t[0], goal[1] - cam.t[1], goal[2] - cam.t[2]);
   dur = dur || (b && cam.focus ? 6.5 : 5.5);
+  const quick = dur < 2; // chosen by hand: get there now, with no scenic pull-back
   let yawDelta = 0;
   if (b && b.kind !== 'star') { // arrive off to one side of the sun line so the world shows a phase
-    const sunYaw = Math.atan2(-goal[2], -goal[0]), side = (hash3(b.name.length, Math.floor(time), 7) & 1) ? 1 : -1;
-    yawDelta = wrapPi(sunYaw + side * (0.85 + (hash3(Math.floor(time), 3, 1) % 100) / 100 * 0.5) - (cam.yaw + YAW_RATE * dur));
+    const sunYaw = Math.atan2(-goal[2], -goal[0]), off = 0.85 + (hash3(Math.floor(time), 3, 1) % 100) / 100 * 0.5, now = cam.yaw + YAW_RATE * dur;
+    const dA = wrapPi(sunYaw + off - now), dB = wrapPi(sunYaw - off - now);
+    yawDelta = quick ? (Math.abs(dA) < Math.abs(dB) ? dA : dB) : (hash3(b.name.length, Math.floor(time), 7) & 1) ? dA : dB;
   }
   cam.tr = { u: 0, dur, from: cam.t.slice(), fromDist: cam.distBase, fromO: cam.o, fromPitch: cam.pitchBase, yawDelta, lastE: 0,
-    hump: b && cam.focus ? Math.min(span * 0.75, overviewDist * 0.6) : 0 };
+    hump: b && cam.focus && !quick ? Math.min(span * 0.75, overviewDist * 0.6) : 0 };
   cam.focus = b; cam.zoom = 1; labelT = -dur * 0.55;
   syncWorldButtons();
 }
@@ -1088,6 +1146,20 @@ function drawBelt() {
     plot(x, y, c[0]*lt[0]*v, c[1]*lt[1]*v, c[2]*lt[2]*v, bl.thr[k]);
   }
 }
+function drawLets(p) { // small moons as single pixels; inner ones keep to the planet's equator, outer ones swarm on tilted paths
+  const L = p.lets, d = L.d, cr = cam.right, cd = cam.down, bk = cam.back, cp = cam.pos, lt = sys.light, sc = p.sc;
+  for (let k = 0, j = 0; k < L.n; k++, j += 7) {
+    const a = d[j] * sc, ang = d[j+1] + d[j+2] * time, c = Math.cos(ang) * a, s2 = Math.sin(ang) * a; let x, y, z;
+    if (d[j+3] < -1) { x = p.e1[0]*c + p.e2[0]*s2; y = p.e1[1]*c + p.e2[1]*s2; z = p.e1[2]*c + p.e2[2]*s2; }
+    else { const zz = s2 * d[j+3]; y = s2 * d[j+4]; x = c * d[j+5] - zz * d[j+6]; z = c * d[j+6] + zz * d[j+5]; }
+    const vx = p.pos[0] + x - cp[0], vy = p.pos[1] + y - cp[1], vz = p.pos[2] + z - cp[2], zc = -(vx*bk[0] + vy*bk[1] + vz*bk[2]);
+    if (zc < 1) continue;
+    const px = Math.floor(CX + F * (vx*cr[0] + vy*cr[1] + vz*cr[2]) / zc), py = Math.floor(CY + F * (vx*cd[0] + vy*cd[1] + vz*cd[2]) / zc);
+    if (px < 0 || py < 0 || px >= W || py >= H || zc > depth[py * W + px]) continue;
+    const v = 0.16 + (L.thr[k] / 255) * 0.3;
+    plot(px, py, lt[0]*v, lt[1]*v, lt[2]*v, L.thr[k]);
+  }
+}
 
 /* ───────────── captions (3×5 pixel type) ───────────── */
 const WHITE = [1, 1, 1];
@@ -1114,9 +1186,9 @@ function drawLabel() {
   const k = clamp(labelT / 1.4, 0, 1); if (k <= 0) return;
   const b = cam.focus, sc = MINWH >= 320 ? 2 : 1, x = 6 * sc, y = 6 * sc;
   let l1, l2;
-  if (!b) { l1 = sys.name; l2 = sys.planets.length + ' worlds * ' + sys.star.label; }
+  if (!b) { l1 = sys.name; l2 = (sys.caption || sys.planets.length + ' worlds') + ' * ' + sys.star.label; }
   else if (b.kind === 'star') { l1 = sys.name; l2 = b.label; }
-  else { l1 = b.name; l2 = (b.ring ? 'Ringed ' : '') + (b.kind === 'moon' ? b.label.replace('world', 'moon') : b.label) + (b.moons.length ? ' * ' + b.moons.length + (b.moons.length > 1 ? ' moons' : ' moon') : '') + (b.lights ? ' * lit at night' : ''); }
+  else { const mc = b.moons.length + (b.lets ? b.lets.n : 0); l1 = b.name; l2 = (b.ring ? 'Ringed ' : '') + (b.kind === 'moon' ? b.label.replace('world', 'moon') : b.label) + (mc ? ' * ' + mc + (mc > 1 ? ' moons' : ' moon') : '') + (b.lights ? ' * lit at night' : ''); }
   drawText(l1, x, y, k, sc, WHITE); drawText(l2, x, y + 8 * sc, k, sc, PALETTES[S.pal].midc);
 }
 
@@ -1131,6 +1203,7 @@ function render() {
   for (const b of order) { bodyMatrix(b); if (b.kind === 'star') drawStar(b); else drawBody(b); }
   if (S.orbits) drawOrbits();
   drawBelt();
+  if (cam.o < 0.5) for (const p of sys.planets) if (p.lets && p.vis && p.rpx > 6) drawLets(p);
   if (S.labels) drawLabel();
   // palette + dither
   const pal = PALETTES[S.pal].u32, fd = fade * fade, n = W * H;
@@ -1192,7 +1265,7 @@ const $ = id => document.getElementById(id);
 const seedInput = $('seed');
 function applyPalette() {
   const pal = PALETTES[S.pal]; buildLUT(pal);
-  $('pal-name').textContent = pal.name;
+  $('pal').value = String(S.pal);
   const sw = $('swatch'); sw.textContent = ''; for (const c of pal.c) { const i = document.createElement('i'); i.style.background = c; sw.appendChild(i); }
   const n = pal.c.length, ink = pal.c[pal.seq[0]], lit = pal.c[pal.seq[n - 1]];
   const mid = n >= 3 ? pal.c[pal.seq[Math.ceil((n - 1) / 2)]] : lit;
@@ -1209,6 +1282,7 @@ function syncUI() {
 function syncWorldButtons() { const b = $('w-sys'); if (b) b.setAttribute('aria-pressed', cam.focus ? 'false' : 'true'); }
 const cyc = (v, d, n) => (v + d + n) % n;
 function setPal(d) { S.pal = cyc(S.pal, d, PALETTES.length); applyPalette(); save(); }
+function setCollapsed(v) { S.collapsed = v; document.body.classList.toggle('collapsed', v); $('hud').inert = v; save(); }
 function setDit(d) { S.dit = cyc(S.dit, d, DITHERS.length); buildThr(); syncUI(); save(); }
 function setPx() { S.px = cyc(S.px, 1, PIXELS.length); resize(); syncUI(); save(); }
 function setMode() { S.mode = cyc(S.mode, 1, MODES.length); buildTour(); tour.timer = 12; syncUI(); save(); }
@@ -1216,19 +1290,25 @@ function toggle(k) { S[k] = !S[k]; syncUI(); save(); }
 function hold() { tour.timer = Math.max(tour.timer, 40); } // a hand on the wheel pauses the tour for a while
 function worldStep(d) {
   const list = [null, ...sys.planets], i = Math.max(0, list.indexOf(cam.focus && cam.focus.parent ? cam.focus.parent : cam.focus));
-  setFocus(list[cyc(i, d, list.length)]); hold();
+  setFocus(list[cyc(i, d, list.length)], QUICK); hold();
 }
 function roll() { const s = randomSeed(); seedInput.value = s; warp(s); }
 function fullscreen() { try { if (document.fullscreenElement) document.exitFullscreen(); else { const p = document.documentElement.requestFullscreen(); if (p && p.catch) p.catch(() => {}); } } catch (e) {} }
 
 $('seed-form').addEventListener('submit', e => { e.preventDefault(); const v = seedInput.value.trim() || randomSeed(); warp(v); seedInput.blur(); });
 $('btn-roll').addEventListener('click', roll);
-$('pal-prev').addEventListener('click', () => setPal(-1)); $('pal-next').addEventListener('click', () => setPal(1)); $('pal-name').addEventListener('click', () => setPal(1));
+{ const sel = $('pal'); // one group per palette size
+  for (const g in PALETTE_GROUPS) { const og = document.createElement('optgroup'); og.label = PALETTE_GROUPS[g];
+    PALETTES.forEach((q, i) => { if (q.g === g) { const o = document.createElement('option'); o.value = String(i); o.textContent = q.name + ' \u00b7 ' + q.c.length; og.appendChild(o); } });
+    sel.appendChild(og); }
+  sel.addEventListener('change', () => { S.pal = +sel.value; applyPalette(); save(); }); }
+$('pal-prev').addEventListener('click', () => setPal(-1)); $('pal-next').addEventListener('click', () => setPal(1));
+$('btn-hide').addEventListener('click', () => setCollapsed(true)); $('hud-tab').addEventListener('click', () => setCollapsed(false));
 $('dit-prev').addEventListener('click', () => setDit(-1)); $('dit-next').addEventListener('click', () => setDit(1)); $('dit-name').addEventListener('click', () => setDit(1));
 $('dit-amt').addEventListener('input', e => { S.amt = +e.target.value; buildThr(); save(); });
 $('px').addEventListener('click', setPx); $('mode').addEventListener('click', setMode);
 $('w-prev').addEventListener('click', () => worldStep(-1)); $('w-next').addEventListener('click', () => worldStep(1));
-$('w-sys').addEventListener('click', () => { setFocus(null); hold(); });
+$('w-sys').addEventListener('click', () => { setFocus(null, QUICK); hold(); });
 $('t-orb').addEventListener('click', () => toggle('orbits')); $('t-con').addEventListener('click', () => toggle('lines')); $('t-lab').addEventListener('click', () => toggle('labels'));
 $('btn-full').addEventListener('click', fullscreen);
 
@@ -1252,7 +1332,7 @@ function endPointer(e) {
     const rect = canvas.getBoundingClientRect(), x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale;
     let hit = null;
     for (const b of sys.bodies) { if (!b.vis) continue; const rr = Math.max(b.rpx, 5); if (Math.hypot(b.sx - x, b.sy - y) <= rr && (!hit || b.zc < hit.zc)) hit = b; }
-    if (hit && hit !== cam.focus) { setFocus(hit); hold(); } else if (!hit && cam.focus) { setFocus(null); hold(); }
+    if (hit && hit !== cam.focus) { setFocus(hit, QUICK); hold(); } else if (!hit && cam.focus) { setFocus(null, QUICK); hold(); }
   }
   pd = null; dragging = false; document.body.classList.remove('dragging');
 }
@@ -1264,6 +1344,7 @@ function requestWake() { try { if (!wakeLock && navigator.wakeLock) navigator.wa
 
 window.addEventListener('keydown', e => {
   if (e.target === seedInput) { if (e.key === 'Escape') seedInput.blur(); return; }
+  if (e.target.tagName === 'SELECT') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase(); let used = true;
   if (k === ' ' && e.target.tagName !== 'BUTTON') roll();
@@ -1272,8 +1353,8 @@ window.addEventListener('keydown', e => {
   else if (k === 'arrowup') setPal(-1); else if (k === 'arrowdown' || k === 'p') setPal(1);
   else if (k === 'd') setDit(1); else if (k === 'x') setPx(); else if (k === 'm') setMode();
   else if (k === 'o') toggle('orbits'); else if (k === 'c') toggle('lines'); else if (k === 'l') toggle('labels');
-  else if (k === 'f') fullscreen();
-  else if (k === 'escape' || k === '0') { setFocus(null); hold(); }
+  else if (k === 'f') fullscreen(); else if (k === 'h') setCollapsed(!S.collapsed);
+  else if (k === 'escape' || k === '0') { setFocus(null, QUICK); hold(); }
   else used = false;
   if (used && k !== ' ') e.preventDefault(); else if (k === ' ' && e.target.tagName !== 'BUTTON') e.preventDefault();
 });
@@ -1281,7 +1362,7 @@ window.addEventListener('resize', resize);
 
 /* ───────────── start ───────────── */
 function start() {
-  applyPalette(); syncUI(); resize();
+  applyPalette(); syncUI(); resize(); setCollapsed(S.collapsed);
   let seed = '';
   try { seed = decodeURIComponent((location.hash || '').slice(1)); } catch (e) {}
   if (!/^[A-Za-z0-9-]{1,40}$/.test(seed)) seed = randomSeed();
