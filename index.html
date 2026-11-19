@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Quiet Orbits</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap">
@@ -43,11 +43,6 @@ body.idle .hud:not(:has(:focus-visible)), body.collapsed .hud{transform:translat
 #mini{position:fixed;z-index:6;display:flex;gap:4px;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));transition:opacity .3s steps(4,end)}
 body:not(.collapsed) #mini{display:none}
 body.idle #mini:not(:has(:focus-visible)){opacity:0;pointer-events:none}
-@media (pointer:coarse){
-  button,select,input[type=text]{min-height:34px}
-  #mini{gap:8px}
-  #mini button{min-width:46px;min-height:42px}
-}
 @media (prefers-reduced-motion:reduce){.hud,#mini{transition:none}}
 
 .grp{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -92,6 +87,16 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
 #swatch{display:flex;height:6px;border:2px solid var(--lit)}
 #swatch i{flex:1;display:block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* touch screens: bigger targets, and fields at 16px because phones zoom the page when a focused field's text is smaller */
+@media (pointer:coarse){
+  button,select,input[type=text]{min-height:34px}
+  input[type=text],select{font-size:16px}
+  input[type=text]{width:9.5em}
+  select{width:12.5em}
+  #mini{gap:8px}
+  #mini button{min-width:46px;min-height:42px}
+}
 </style>
 
 <canvas id="sky" role="img" aria-label="A slowly drifting, procedurally generated solar system drawn in a limited pixel palette"></canvas>
@@ -1349,6 +1354,15 @@ function fullscreen() { try { if (document.fullscreenElement) document.exitFulls
 
 $('seed-form').addEventListener('submit', e => { e.preventDefault(); const v = seedInput.value.trim() || randomSeed(); warp(v); seedInput.blur(); });
 $('btn-roll').addEventListener('click', roll);
+// after typing on a phone: undo any page zoom or scroll the keyboard left behind
+function settleViewport() {
+  try { window.scrollTo(0, 0);
+    const vv = window.visualViewport, m = document.querySelector('meta[name="viewport"]');
+    if (m && vv && vv.scale > 1.01) { const c = m.getAttribute('content'); m.setAttribute('content', 'width=device-width,initial-scale=1,maximum-scale=1'); setTimeout(() => m.setAttribute('content', c), 60); }
+  } catch (e) {}
+}
+seedInput.addEventListener('focus', () => { try { seedInput.select(); } catch (e) {} }); // typing replaces the old seed
+seedInput.addEventListener('blur', () => setTimeout(settleViewport, 80)); $('pal').addEventListener('blur', () => setTimeout(settleViewport, 80));
 { const sel = $('pal'); // one group per palette size
   for (const g in PALETTE_GROUPS) { const og = document.createElement('optgroup'); og.label = PALETTE_GROUPS[g];
     PALETTES.forEach((q, i) => { if (q.g === g) { const o = document.createElement('option'); o.value = String(i); o.textContent = q.name + ' \u00b7 ' + q.c.length; og.appendChild(o); } });
