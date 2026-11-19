@@ -58,7 +58,7 @@ button,input[type=text],select{
 }
 button{cursor:pointer;white-space:nowrap}
 select{
-  -webkit-appearance:none;appearance:none;cursor:pointer;width:13.5em;max-width:100%;padding-right:22px;
+  -webkit-appearance:none;appearance:none;cursor:pointer;width:16em;max-width:100%;padding-right:22px;
   background-image:linear-gradient(45deg,transparent 50%,var(--lit) 50%),linear-gradient(135deg,var(--lit) 50%,transparent 50%);
   background-position:calc(100% - 11px) 50%,calc(100% - 6px) 50%;background-size:5px 5px;background-repeat:no-repeat;
 }
@@ -236,7 +236,7 @@ const mix3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], 
 const mul3 = (a, k) => [a[0]*k, a[1]*k, a[2]*k];
 
 /* ───────────── palettes (dark → light, hand-tuned) ───────────── */
-const PALETTE_GROUPS = { wide: '8 to 16 colours', mid: '5 to 6 colours', small: '2 to 4 colours', paper: 'Paper (light ground)' };
+const PALETTE_GROUPS = { wide: '8 to 16 colours', c16: 'Lospec \u00b7 16 colours', c32: 'Lospec \u00b7 17 to 32 colours', mid: '5 to 6 colours', small: '2 to 4 colours', paper: 'Paper (light ground)' };
 const PALETTES = [
   { name: 'Dustlight',  g: 'wide', c: ['#2b2530','#4c4760','#526f8c','#8a5566','#8f9a6c','#c9a36e','#bcdbe0','#f3ecc8'] },
   { name: 'Orrery',     g: 'wide', c: ['#0d0d1d','#24315f','#2f7c86','#6aae69','#d8b25a','#b4513d','#d6d0c3','#fdf8ea'] },
@@ -245,6 +245,41 @@ const PALETTES = [
   { name: 'Deep Field', g: 'wide', c: ['#03040a','#141a3a','#3a2a6b','#7a3f8f','#d0608a','#f2b37a','#5aa9c9','#f8f1dc'] },
   { name: 'Tidewrack',  g: 'wide', c: ['#10151c','#27384a','#3f6b6e','#7fa88a','#c9c48d','#a8654f','#6d4a63','#eef0df'] },
   { name: 'Spectrum',   g: 'wide', c: ['#0e0c1b','#2a2247','#4e3b78','#24415d','#2e6e73','#4ea569','#a8d05c','#f1e17a','#efa74a','#d8623b','#a7333f','#6d2648','#896a5b','#c8b19b','#9ed3df','#fbf7ea'] },
+
+  // community palettes from lospec.com, colours exactly as published there
+  { name: 'Sweetie 16', g: 'c16', c: ['#1a1c2c','#5d275d','#b13e53','#ef7d57','#ffcd75','#a7f070','#38b764','#257179','#29366f','#3b5dc9','#41a6f6','#73eff7','#f4f4f4','#94b0c2','#566c86','#333c57'] },
+  { name: 'PICO-8', g: 'c16', c: ['#000000','#1d2b53','#7e2553','#008751','#ab5236','#5f574f','#c2c3c7','#fff1e8','#ff004d','#ffa300','#ffec27','#00e436','#29adff','#83769c','#ff77a8','#ffccaa'] },
+  { name: 'DawnBringer 16', g: 'c16', c: ['#140c1c','#442434','#30346d','#4e4a4e','#854c30','#346524','#d04648','#757161','#597dce','#d27d2c','#8595a1','#6daa2c','#d2aa99','#6dc2ca','#dad45e','#deeed6'] },
+  { name: 'Endesga 16', g: 'c16', c: ['#e4a672','#b86f50','#743f39','#3f2832','#9e2835','#e53b44','#fb922b','#ffe762','#63c64d','#327345','#193d3f','#4f6781','#afbfd2','#ffffff','#2ce8f4','#0484d1'] },
+  { name: 'Steam Lords', g: 'c16', c: ['#213b25','#3a604a','#4f7754','#a19f7c','#77744f','#775c4f','#603b3a','#3b2137','#170e19','#2f213b','#433a60','#4f5277','#65738c','#7c94a1','#a0b9ba','#c0d1cc'] },
+  { name: 'NA16', g: 'c16', c: ['#8c8fae','#584563','#3e2137','#9a6348','#d79b7d','#f5edba','#c0c741','#647d34','#e4943a','#9d303b','#d26471','#70377f','#7ec4c1','#34859d','#17434b','#1f0e1c'] },
+  { name: 'Arne 16', g: 'c16', c: ['#000000','#493c2b','#be2633','#e06f8b','#9d9d9d','#a46422','#eb8931','#f7e26b','#ffffff','#1b2632','#2f484e','#44891a','#a3ce27','#005784','#31a2f2','#b2dcef'] },
+  { name: 'Island Joy 16', g: 'c16', c: ['#ffffff','#6df7c1','#11adc1','#606c81','#393457','#1e8875','#5bb361','#a1e55a','#f7e476','#f99252','#cb4d68','#6a3771','#c92464','#f48cb6','#f7b69e','#9b9c82'] },
+  { name: 'Bubblegum 16', g: 'c16', c: ['#16171a','#7f0622','#d62411','#ff8426','#ffd100','#fafdff','#ff80a4','#ff2674','#94216a','#430067','#234975','#68aed4','#bfff3c','#10d275','#007899','#002859'] },
+  { name: 'AAP-16', g: 'c16', c: ['#070708','#332222','#774433','#cc8855','#993311','#dd7711','#ffdd55','#ffff33','#55aa44','#115522','#44eebb','#3388dd','#5544aa','#555577','#aabbbb','#ffffff'] },
+  { name: 'Europa 16', g: 'c16', c: ['#ffffff','#75ceea','#317ad7','#283785','#1a1b35','#2e354e','#4f6678','#a4bcc2','#ecf860','#94d446','#3b7850','#20322e','#512031','#a43e4b','#dc7d5e','#f0cc90'] },
+  { name: 'Night 16', g: 'c16', c: ['#0f0f1e','#fff8bc','#0c2133','#48586d','#79a0b0','#b0ce9d','#657f49','#3f4536','#b99d6a','#ffdd91','#dd945b','#9a5142','#644b48','#333033','#767088','#c5a3b3'] },
+  { name: 'Vanilla Milkshake', g: 'c16', c: ['#28282e','#6c5671','#d9c8bf','#f98284','#b0a9e4','#accce4','#b3e3da','#feaae4','#87a889','#b0eb93','#e9f59d','#ffe6c6','#dea38b','#ffc384','#fff7a0','#fff7e4'] },
+  { name: 'Galaxy Flame', g: 'c16', c: ['#699fad','#3a708e','#2b454f','#111215','#151d1a','#1d3230','#314e3f','#4f5d42','#9a9f87','#ede6cb','#f5d893','#e8b26f','#b6834c','#704d2b','#40231e','#151015'] },
+  { name: 'Commodore 64', g: 'c16', c: ['#000000','#626262','#898989','#adadad','#ffffff','#9f4e44','#cb7e75','#6d5412','#a1683c','#c9d487','#9ae29b','#5cab5e','#6abfc6','#887ecb','#50459b','#a057a3'] },
+  { name: 'Urbex 16', g: 'c16', c: ['#cbd1be','#8f9389','#52534c','#26201d','#e0a46e','#91a47a','#5d7643','#4d533a','#a93130','#7a1338','#834664','#917692','#160712','#593084','#3870be','#579fb4'] },
+  { name: 'Taffy 16', g: 'c16', c: ['#222533','#6275ba','#a3c0e6','#fafffc','#ffab7b','#ff6c7a','#dc435b','#3f48c2','#448de7','#2bdb72','#a7f547','#ffeb33','#f58931','#db4b3d','#a63d57','#36354d'] },
+  { name: 'SLSO-CLR17', g: 'c32', c: ['#2e2c3b','#3e415f','#55607d','#747d88','#41de95','#2aa4aa','#3b77a6','#249337','#56be44','#c6de78','#f3c220','#c4651c','#b54131','#61407a','#8f3da7','#ea619d','#c1e5ea'] },
+  { name: 'Autumn Glow', g: 'c32', c: ['#ffffe1','#ffd8a9','#ffb366','#ff5b4f','#f2af92','#f39d91','#d38e84','#c37289','#ad82cf','#8455a9','#794d81','#4a3778','#a9548a','#814d6e','#c92e70','#9e2081','#7e9770','#5d7668','#235a63','#533a44'] },
+  { name: 'Punolit', g: 'c32', c: ['#caebe0','#729aa1','#446077','#2e3850','#1e182e','#14081a','#070109','#091820','#123735','#2f6b4e','#4b974f','#91b95b','#e6e29e','#dccd93','#b7836b','#995154','#6b2c40','#310e25','#3a2140','#6e3f5f','#97576c'] },
+  { name: 'Fantasy 24', g: 'c32', c: ['#1f240a','#39571c','#a58c27','#efac28','#efd8a1','#ab5c1c','#183f39','#ef692f','#efb775','#a56243','#773421','#724113','#2a1d0d','#392a1c','#684c3c','#927e6a','#276468','#ef3a0c','#45230d','#3c9f9c','#9b1a0a','#36170c','#550f0a','#300f0a'] },
+  { name: 'Vinik24', g: 'c32', c: ['#000000','#6f6776','#9a9a97','#c5ccb8','#8b5580','#c38890','#a593a5','#666092','#9a4f50','#c28d75','#7ca1c0','#416aa3','#8d6268','#be955c','#68aca9','#387080','#6e6962','#93a167','#6eaa78','#557064','#9d9f7f','#7e9e99','#5d6872','#433455'] },
+  { name: 'CC-29', g: 'c32', c: ['#f2f0e5','#b8b5b9','#868188','#646365','#45444f','#3a3858','#212123','#352b42','#43436a','#4b80ca','#68c2d3','#a2dcc7','#ede19e','#d3a068','#b45252','#6a536e','#4b4158','#80493a','#a77b5b','#e5ceb4','#c2d368','#8ab060','#567b79','#4e584a','#7b7243','#b2b47e','#edc8c4','#cf8acb','#5f556a'] },
+  { name: 'DawnBringer 32', g: 'c32', c: ['#000000','#222034','#45283c','#663931','#8f563b','#df7126','#d9a066','#eec39a','#fbf236','#99e550','#6abe30','#37946e','#4b692f','#524b24','#323c39','#3f3f74','#306082','#5b6ee1','#639bff','#5fcde4','#cbdbfc','#ffffff','#9badb7','#847e87','#696a6a','#595652','#76428a','#ac3232','#d95763','#d77bba','#8f974a','#8a6f30'] },
+  { name: 'Endesga 32', g: 'c32', c: ['#be4a2f','#d77643','#ead4aa','#e4a672','#b86f50','#733e39','#3e2731','#a22633','#e43b44','#f77622','#feae34','#fee761','#63c74d','#3e8948','#265c42','#193c3e','#124e89','#0099db','#2ce8f5','#ffffff','#c0cbdc','#8b9bb4','#5a6988','#3a4466','#262b44','#181425','#ff0044','#68386c','#b55088','#f6757a','#e8b796','#c28569'] },
+  { name: 'Zughy 32', g: 'c32', c: ['#472d3c','#5e3643','#7a444a','#a05b53','#bf7958','#eea160','#f4cca1','#b6d53c','#71aa34','#397b44','#3c5956','#302c2e','#5a5353','#7d7071','#a0938e','#cfc6b8','#dff6f5','#8aebf1','#28ccdf','#3978a8','#394778','#39314b','#564064','#8e478c','#cd6093','#ffaeb6','#f4b41b','#f47e1b','#e6482e','#a93b3b','#827094','#4f546b'] },
+  { name: 'Resurrect 32', g: 'c32', c: ['#ffffff','#fb6b1d','#e83b3b','#831c5d','#c32454','#f04f78','#f68181','#fca790','#e3c896','#ab947a','#966c6c','#625565','#3e3546','#0b5e65','#0b8a8f','#1ebc73','#91db69','#fbff86','#fbb954','#cd683d','#9e4539','#7a3045','#6b3e75','#905ea9','#a884f3','#eaaded','#8fd3ff','#4d9be6','#4d65b4','#484a77','#30e1b9','#8ff8e2'] },
+  { name: 'Mulfok32', g: 'c32', c: ['#5ba675','#6bc96c','#abdd64','#fcef8d','#ffb879','#ea6262','#cc425e','#a32858','#751756','#390947','#611851','#873555','#a6555f','#c97373','#f2ae99','#ffc3f2','#ee8fcb','#d46eb3','#873e84','#1f102a','#4a3052','#7b5480','#a6859f','#d9bdc8','#ffffff','#aee2ff','#8db7ff','#6d80fa','#8465ec','#834dc4','#7d2da0','#4e187c'] },
+  { name: 'Nanner 32', g: 'c32', c: ['#6074ab','#6b9acf','#8bbde6','#aae0f3','#c8eded','#faffe0','#dde6e0','#b4bec2','#949da8','#7a7a99','#5b5280','#4e3161','#421e42','#612447','#7a3757','#96485b','#bd6868','#d18b79','#dbac8c','#e6cfa1','#e7ebbc','#b2dba0','#87c293','#70a18f','#637c8f','#b56e75','#c98f8f','#dfb6ae','#edd5ca','#bd7182','#9e5476','#753c6a'] },
+  { name: 'Jehkoba32', g: 'c32', c: ['#000000','#00021c','#1c284d','#343473','#2d5280','#4d7a99','#7497a6','#a3ccd9','#f0edd8','#732866','#a6216e','#d94c87','#d9214f','#f25565','#f27961','#993649','#b36159','#f09c60','#b38f24','#b3b324','#f7c93e','#17735f','#119955','#67b31b','#1ba683','#47cca9','#96e3c9','#2469b3','#0b8be6','#0bafe6','#f28d85','#f0bb90'] },
+  { name: 'Hept32', g: 'c32', c: ['#000000','#180d2f','#353658','#686b72','#8b97b6','#c5cddb','#ffffff','#5ee9e9','#2890dc','#1831a7','#053239','#005f41','#08b23b','#47f641','#e8ff75','#fbbe82','#de9751','#b66831','#8a4926','#461c14','#1e090d','#720d0d','#813704','#da2424','#ef6e10','#ecab11','#ece910','#f78d8d','#f94e6d','#c12458','#841252','#3d083b'] },
+  { name: 'Pineapple 32', g: 'c32', c: ['#43002a','#890027','#d9243c','#ff6157','#ffb762','#c76e46','#73392e','#34111f','#030710','#273b2d','#458239','#9cb93b','#ffd832','#ff823b','#d1401f','#7c191a','#310c1b','#833f34','#eb9c6e','#ffdaac','#ffffe4','#bfc3c6','#6d8a8d','#293b49','#041528','#033e5e','#1c92a7','#77d6c1','#ffe0dc','#ff88a9','#c03b94','#601761'] },
+  { name: 'Sheltzy32', g: 'c32', c: ['#8cffde','#45b8b3','#839740','#c9ec85','#46c657','#158968','#2c5b6d','#222a5c','#566a89','#8babbf','#cce2e1','#ffdba5','#ccac68','#a36d3e','#683c34','#000000','#38002c','#663b93','#8b72de','#9cd8fc','#5e96dd','#3953c0','#800c53','#c34b91','#ff94b3','#bd1f3f','#ec614a','#ffa468','#fff6ae','#ffda70','#f4b03c','#ffffff'] },
 
   { name: 'Nocturne',   g: 'mid', c: ['#130c21','#3a2052','#853b70','#dd676a','#f3b178','#fbeed3'] },
   { name: 'Oxide',      g: 'mid', c: ['#150d0d','#46221e','#8b4a30','#7b8d78','#c88a4c','#e9dab7'] },
@@ -303,7 +338,9 @@ function buildLUT(pal) {
   const D = gam[seq[0]], span = luma[seq[n - 1]] - luma[seq[0]];
   const unmap = c => [0, 1, 2].map(k => { const v = Math.abs(span) < 1e-4 ? 0 : clamp((c[k] - D[k]) / span, 0, 1); return v * v; });
   pal.seq = seq;
-  pal.night = n >= 3 ? unmap(gam[seq[1]]) : [0, 0, 0];
+  let ni = 1; while (ni < n - 2 && Math.abs(lab[seq[ni]][0] - lab[seq[0]][0]) < 0.12) ni++; // night side: the first shade that reads apart from the ground
+  pal.nightIndex = ni;
+  pal.night = n >= 3 ? unmap(gam[seq[ni]]) : [0, 0, 0];
   pal.midc = n >= 3 ? unmap(gam[seq[Math.ceil((n - 1) / 2)]]) : [1, 1, 1];
   let cell = 0;
   for (let ri = 0; ri < LN; ri++) for (let gi = 0; gi < LN; gi++) for (let bi = 0; bi < LN; bi++, cell++) {
