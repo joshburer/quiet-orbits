@@ -15,11 +15,12 @@
   --accent:#c98a6b;   /* focus, pressed state */
   --font-ui:'Silkscreen','Lucida Console',ui-monospace,'Courier New',monospace;
 }
-html,body{height:100%}
+html,body{height:100%;overscroll-behavior:none}
 body{
   margin:0;background:var(--ink);color:var(--lit);font-family:var(--font-ui);
   font-size:11px;line-height:1.2;overflow:hidden;
   -webkit-font-smoothing:none;font-smooth:never;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
 }
 #sky{
   position:fixed;left:0;top:0;display:block;
@@ -39,10 +40,15 @@ body.dragging #sky{cursor:grabbing}
   transition:transform .35s steps(7,end);
 }
 body.idle .hud:not(:has(:focus-visible)), body.collapsed .hud{transform:translateY(105%)}
-#hud-tab{position:fixed;z-index:6;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));transition:opacity .3s steps(4,end)}
-body:not(.collapsed) #hud-tab{display:none}
-body.idle #hud-tab:not(:focus-visible){opacity:0;pointer-events:none}
-@media (prefers-reduced-motion:reduce){.hud,#hud-tab{transition:none}}
+#mini{position:fixed;z-index:6;display:flex;gap:4px;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));transition:opacity .3s steps(4,end)}
+body:not(.collapsed) #mini{display:none}
+body.idle #mini:not(:has(:focus-visible)){opacity:0;pointer-events:none}
+@media (pointer:coarse){
+  button,select,input[type=text]{min-height:34px}
+  #mini{gap:8px}
+  #mini button{min-width:46px;min-height:42px}
+}
+@media (prefers-reduced-motion:reduce){.hud,#mini{transition:none}}
 
 .grp{display:flex;flex-direction:column;gap:4px;min-width:0}
 .grp > .lbl{color:var(--mid);letter-spacing:.12em;text-transform:uppercase;font-size:10px}
@@ -63,13 +69,15 @@ select{
   background-position:calc(100% - 11px) 50%,calc(100% - 6px) 50%;background-size:5px 5px;background-repeat:no-repeat;
 }
 select option,select optgroup{background:var(--ink);color:var(--lit);text-transform:none}
-button:hover{background:var(--lit);color:var(--ink)}
+@media (hover:hover){
+  button:hover{background:var(--lit);color:var(--ink)}
+  button[aria-pressed="false"]:hover{background:var(--mid);color:var(--ink)}
+}
 button:active{background:var(--accent);border-color:var(--accent);color:var(--ink)}
 button[aria-pressed="true"]{background:var(--lit);color:var(--ink)}
 button[aria-pressed="false"]{border-color:var(--mid);color:var(--mid)}
-button[aria-pressed="false"]:hover{background:var(--mid);color:var(--ink)}
 button.name{min-width:9.5em;text-align:center}
-input[type=text]{width:11em;text-transform:lowercase;cursor:text}
+input[type=text]{width:11em;text-transform:lowercase;cursor:text;-webkit-user-select:text;user-select:text}
 input[type=text]::selection{background:var(--lit);color:var(--ink)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
@@ -89,7 +97,7 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
 <canvas id="sky" role="img" aria-label="A slowly drifting, procedurally generated solar system drawn in a limited pixel palette"></canvas>
 
 <div class="hud" id="hud">
-  <p class="brand">Quiet Orbits<small>drag to turn · tap a world</small></p>
+  <p class="brand">Quiet Orbits<small>drag · pinch · tap a world</small></p>
 
   <form class="grp" id="seed-form" autocomplete="off">
     <label class="lbl" for="seed">Seed</label>
@@ -151,7 +159,11 @@ input[type=range]::-moz-range-thumb{width:8px;height:12px;background:var(--lit);
     </div>
   </div>
 </div>
-<button type="button" id="hud-tab" title="Show the controls (H)">Menu</button>
+<div id="mini" role="group" aria-label="Quick controls">
+  <button type="button" id="hud-tab" title="Show the controls (H)">Menu</button>
+  <button type="button" id="mini-prev" aria-label="Previous world" title="Previous world (Left)">&lt;</button>
+  <button type="button" id="mini-next" aria-label="Next world" title="Next world (Right)">&gt;</button>
+</div>
 
 <script>
 (() => {
@@ -400,7 +412,8 @@ const MODES = ['Wander', 'Tour', 'Still'];
 
 /* ───────────── settings ───────────── */
 const S = { pal: 0, palName: 'Dustlight', dit: 0, amt: 100, px: 1, mode: 0, orbits: true, lines: true, labels: true, collapsed: false };
-try { const saved = JSON.parse(localStorage.getItem('quiet-orbits') || 'null');
+let savedCollapse = false;
+try { const saved = JSON.parse(localStorage.getItem('quiet-orbits') || 'null'); savedCollapse = !!saved && typeof saved.collapsed === 'boolean';
   if (saved && typeof saved === 'object') for (const k in S) if (typeof saved[k] === typeof S[k]) S[k] = saved[k];
 } catch (e) {}
 S.pal = Math.max(0, PALETTES.findIndex(q => q.name === S.palName)); S.dit = clamp(S.dit | 0, 0, DITHERS.length - 1);
@@ -1341,6 +1354,7 @@ $('btn-roll').addEventListener('click', roll);
   sel.addEventListener('change', () => { S.pal = +sel.value; applyPalette(); save(); }); }
 $('pal-prev').addEventListener('click', () => setPal(-1)); $('pal-next').addEventListener('click', () => setPal(1));
 $('btn-hide').addEventListener('click', () => setCollapsed(true)); $('hud-tab').addEventListener('click', () => setCollapsed(false));
+$('mini-prev').addEventListener('click', () => worldStep(-1)); $('mini-next').addEventListener('click', () => worldStep(1));
 $('dit-prev').addEventListener('click', () => setDit(-1)); $('dit-next').addEventListener('click', () => setDit(1)); $('dit-name').addEventListener('click', () => setDit(1));
 $('dit-amt').addEventListener('input', e => { S.amt = +e.target.value; buildThr(); save(); });
 $('px').addEventListener('click', setPx); $('mode').addEventListener('click', setMode);
@@ -1354,27 +1368,45 @@ let idleTimer = 0;
 function wake() { document.body.classList.remove('idle'); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add('idle'), 4200); }
 ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev => window.addEventListener(ev, wake, { passive: true }));
 
-// pointer: drag to turn, tap to pick a world
-let pd = null;
-canvas.addEventListener('pointerdown', e => { pd = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false }; try { canvas.setPointerCapture(e.pointerId); } catch (er) {} requestWake(); });
+// pointer: one finger (or the mouse) turns, two fingers zoom, a tap picks a world
+const ZOOM_MIN = 0.4, ZOOM_MAX = 6;
+const touches = new Map(); let pd = null, pinch = null;
+const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+canvas.addEventListener('pointerdown', e => {
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
+  if (touches.size === 1) pd = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, multi: false, touch: e.pointerType === 'touch', wasIdle: document.body.classList.contains('idle') };
+  else if (touches.size === 2) { pinch = { d: spread(), zoom: cam.zoom }; if (pd) pd.multi = true; dragging = true; }
+  requestWake();
+});
 canvas.addEventListener('pointermove', e => {
-  if (!pd) return;
-  if (!pd.moved && Math.hypot(e.clientX - pd.x, e.clientY - pd.y) > 5) { pd.moved = true; dragging = true; document.body.classList.add('dragging'); }
+  const t = touches.get(e.pointerId); if (!t || !pd) return;
+  t.x = e.clientX; t.y = e.clientY;
+  if (pinch && touches.size >= 2) { cam.zoom = clamp(pinch.zoom * pinch.d / spread(), ZOOM_MIN, ZOOM_MAX); hold(); return; }
+  if (e.pointerId !== pd.id) return;
+  if (!pd.moved && Math.hypot(e.clientX - pd.x, e.clientY - pd.y) > (pd.touch ? 10 : 5)) { pd.moved = true; dragging = true; document.body.classList.add('dragging'); }
   if (pd.moved) { cam.yaw -= (e.clientX - pd.lx) * 0.006; cam.userPitch = clamp(cam.userPitch + (e.clientY - pd.ly) * 0.005, -1.2, 1.1); hold(); }
   pd.lx = e.clientX; pd.ly = e.clientY;
 });
 function endPointer(e) {
-  if (!pd) return;
-  if (!pd.moved && e.type === 'pointerup') {
-    const rect = canvas.getBoundingClientRect(), x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale;
+  if (!touches.delete(e.pointerId) || !pd) return;
+  if (touches.size >= 2) { pinch = { d: spread(), zoom: cam.zoom }; return; }
+  pinch = null;
+  if (touches.size === 1) { // one finger left after a pinch: carry on turning from where it is, without a jump
+    const [id, t] = [...touches.entries()][0]; pd.id = id; pd.lx = t.x; pd.ly = t.y; pd.moved = true; return;
+  }
+  if (!pd.moved && !pd.multi && e.type === 'pointerup') {
+    const rect = canvas.getBoundingClientRect(), x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale, reach = pd.touch ? 9 : 5;
     let hit = null;
-    for (const b of sys.bodies) { if (!b.vis) continue; const rr = Math.max(b.rpx, 5); if (Math.hypot(b.sx - x, b.sy - y) <= rr && (!hit || b.zc < hit.zc)) hit = b; }
-    if (hit && hit !== cam.focus) { setFocus(hit, QUICK); hold(); } else if (!hit && cam.focus) { setFocus(null, QUICK); hold(); }
+    for (const b of sys.bodies) { if (!b.vis) continue; const rr = Math.max(b.rpx, reach); if (Math.hypot(b.sx - x, b.sy - y) <= rr && (!hit || b.zc < hit.zc)) hit = b; }
+    if (hit && hit !== cam.focus) { setFocus(hit, QUICK); hold(); }
+    else if (!hit && cam.focus && !(pd.touch && pd.wasIdle)) { setFocus(null, QUICK); hold(); } // a touch that only woke the controls does not also leave the world
   }
   pd = null; dragging = false; document.body.classList.remove('dragging');
 }
 canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = clamp(cam.zoom * Math.exp(e.deltaY * 0.0012), 0.45, 3.2); hold(); }, { passive: false });
+canvas.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = clamp(cam.zoom * Math.exp(e.deltaY * 0.0012), ZOOM_MIN, ZOOM_MAX); hold(); }, { passive: false });
+['gesturestart', 'gesturechange'].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false })); // keep Safari from zooming the page itself
 
 let wakeLock = null;
 function requestWake() { try { if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(l => { wakeLock = l; l.addEventListener('release', () => { wakeLock = null; }); }).catch(() => {}); } catch (e) {} }
@@ -1399,7 +1431,9 @@ window.addEventListener('resize', resize);
 
 /* ───────────── start ───────────── */
 function start() {
-  applyPalette(); syncUI(); resize(); setCollapsed(S.collapsed);
+  applyPalette(); syncUI(); resize();
+  if (!savedCollapse && Math.min(window.innerWidth, window.innerHeight) < 520) S.collapsed = true; // phones: sky first, controls a tap away
+  setCollapsed(S.collapsed);
   let seed = '';
   try { seed = decodeURIComponent((location.hash || '').slice(1)); } catch (e) {}
   if (!/^[A-Za-z0-9-]{1,40}$/.test(seed)) seed = randomSeed();
@@ -1408,7 +1442,7 @@ function start() {
   requestAnimationFrame(frame);
 }
 // small hook for tinkering from the console
-window.quietOrbits = { visit: s => warp(s), focus: i => setFocus(i < 0 ? null : sys.planets[i] || sys.star), get system() { return sys; },
+window.quietOrbits = { _zoom: () => cam.zoom, visit: s => warp(s), focus: i => setFocus(i < 0 ? null : sys.planets[i] || sys.star), get system() { return sys; },
   _step: (dt, n) => { for (let i = 0; i < (n || 1); i++) step(dt); render(); }, _probe: (b, x, y, z) => { b.surf(x, y, z, 4); return [sR, sG, sB, sSpec, sTag]; }, _load: s => { loadSystem(String(s)); fade = 1; }, _gen: s => generate(String(s)), _settle: () => { fade = 1; cam.tr = null; labelT = 5; }, _set: (k, v) => { S[k] = v; applyPalette(); buildThr(); syncUI(); } };
 start();
 })();

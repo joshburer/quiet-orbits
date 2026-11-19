@@ -30,7 +30,8 @@ straight from the root of `main`.
 
 | Input | Action |
 | --- | --- |
-| Drag / scroll | Turn the camera / zoom |
+| Drag | Turn the camera |
+| Scroll or two-finger pinch | Zoom |
 | Click a world | Jump to it (click empty sky to return) |
 | Space or R | Random system |
 | Left / Right | Previous / next world |
@@ -41,7 +42,9 @@ straight from the root of `main`.
 | H | Hide or show the control strip |
 
 The control strip hides after a few seconds without input. **Hide** (or H) keeps it
-away until you press **Menu** or H again. Worlds you pick by hand arrive in well under
+away until you press **Menu** or H again; small previous/next buttons stay beside
+**Menu** so you can step through worlds without opening it. On phones the strip starts
+hidden. Worlds you pick by hand arrive in well under
 a second; the slow camera moves are kept for the tour.
 
 ## Palette credits
